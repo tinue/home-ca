@@ -1,0 +1,22 @@
+#!/bin/sh
+# (c) Martin Erzberger 2019
+# Edit this file to setup everything the way you like it
+
+# Full path to the openssl executable
+OPENSSL=/usr/local/opt/openssl@1.1/bin/openssl
+
+# The domain name of your intranet
+DOMAIN=example.com
+
+# Project root path
+export PROJECTROOT=~/Development/home-ca
+
+# Properties of the certificates
+export COUNTRY=CH
+export STATE=ZH
+export CITY=Zurich
+export ORG=Private
+export ORGUNIT=Private
+export EMAIL=adalbert@example.com
+export ROOTCANAME='Example Root CA'
+export ISSUINGCANAME='Example Issuing CA'

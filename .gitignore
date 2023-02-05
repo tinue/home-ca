@@ -1,0 +1,13 @@
+*.iml
+.DS_Store
+/.idea/
+/variables.sh
+certs/
+crl/
+csr/
+newcerts/
+private/
+serial*
+crlnumber*
+index.txt*
+certbackup.zip
