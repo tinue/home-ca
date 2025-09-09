@@ -15,6 +15,8 @@ then
   zip certbackup.zip rootca/certs/* rootca/private/* -x *.open.pem
   # Add Issuing CA and certificates
   zip certbackup.zip issuingca/certs/* issuingca/private/* -x *.open.pem
+  # Add the local variable file
+  zip certbackup.zip variables.sh
   # Protect the backup file
   chmod 600 certbackup.zip
   exit 0
