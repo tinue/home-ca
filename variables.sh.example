@@ -1,12 +1,18 @@
 #!/bin/sh
-# (c) Martin Erzberger 2019
+# (c) Martin Erzberger 2025
 # Edit this file to setup everything the way you like it
 
 # Full path to the openssl executable
-OPENSSL=/usr/local/opt/openssl@1.1/bin/openssl
+OPENSSL=/opt/homebrew/bin/openssl
 
 # The domain name of your intranet
 DOMAIN=example.com
+DOMAINALIAS=com.example
+
+# Hosts to be used in the 'installcerts.sh'-script
+DOCKERHOST=docker  # The machine in my homelab that provides Intel based docker services
+DOCKERPIHOST=dockerpi  # The Raspberry Pi in my homelab that provides ARM based docker services
+DOCKERDIR=~/Docker/my-service
 
 # Project root path
 export PROJECTROOT=~/Development/home-ca

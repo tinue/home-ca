@@ -46,8 +46,9 @@ $OPENSSL req -key private/$1.$DOMAIN.key.pem \
       -new -sha256 -out csr/$1.$DOMAIN.csr.pem
 
 # Sign the CSR; Validity is the maximum allowed under any modern browser (e.g. Chrome)
+# Use 397, not 398, see https://support.apple.com/en-us/HT211025
 $OPENSSL ca -batch -config ./openssl.cnf \
-      -extensions server_cert -days 825 -notext -md sha256 \
+      -extensions server_cert -days 397 -notext -md sha256 \
       -in csr/$1.$DOMAIN.csr.pem \
       -passin env:ISSUINGKEYPWD \
       -out certs/$1.$DOMAIN.cert.pem

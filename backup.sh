@@ -12,9 +12,9 @@ if [[ $REPLY =~ ^[Yy]$ ]]
 then
   source ./variables.sh
   # Add Root CA
-  zip certbackup.zip rootca/certs/* rootca/private/*
+  zip certbackup.zip rootca/certs/* rootca/private/* -x *.open.pem
   # Add Issuing CA and certificates
-  zip certbackup.zip issuingca/certs/* issuingca/private/*
+  zip certbackup.zip issuingca/certs/* issuingca/private/* -x *.open.pem
   # Protect the backup file
   chmod 600 certbackup.zip
   exit 0
