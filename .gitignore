@@ -1,6 +1,13 @@
-*.iml
+# Mac
 .DS_Store
+.TemporaryItems
+Thumbs.db
+._*
+# IDEs
 /.idea/
+*.code-workspace
+*.iml
+# Project specific
 /variables.sh
 certs/
 crl/
