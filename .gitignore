@@ -8,7 +8,7 @@ Thumbs.db
 *.code-workspace
 *.iml
 # Project specific
-/variables.sh
+/defaults.yaml
 certs/
 crl/
 csr/
@@ -18,3 +18,5 @@ serial*
 crlnumber*
 index.txt*
 certbackup.zip
+*.pyc
+/__pycache__

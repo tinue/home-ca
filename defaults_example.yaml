@@ -1,0 +1,18 @@
+---
+opensslpath: /opt/homebrew/bin/openssl # Path to openssl
+domain: example.com # Name of the domain for which the certificates are issued
+domainalias: com.example # Reverse version of the domain, used to name certain elements
+dockerhost: docker # The machine in my homelab that provides Intel based docker services
+dockerpihost: dockerpi # The Raspberry Pi in my homelab that provides ARM based docker services
+dockerdir: /users/example/Docker/my_project
+zipfilename: certbackup.zip
+# Properties of the certificates
+certproperties:
+- country: CH
+- state: ZH
+- city: Zurich
+- org: Private
+- orgunit: Private
+- email: sam@muster.ch
+rootcaname: Sample Root CA
+issuingcaname: Sample Issuing CA
