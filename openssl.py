@@ -79,22 +79,37 @@ def signing_request_renew(cert_name, cn, san_string, key_password):
     )
 
 def sign_certificate(cert_name, issuing_password):
-    return runssl(
-        'x509', '-req',
-        '-in', f'issuingca/csr/{cert_name}.csr.pem',
-        '-CA', 'issuingca/certs/issuing.cert.pem',
-        '-CAkey', 'issuingca/private/issuing.key.pem',
-        '-CAserial', 'issuingca/serial',
-        '-passin', f'pass:{issuing_password}',
-        '-copy_extensions', 'copy',
-        '-days', '200', '-sha256',
-        '-addext', 'basicConstraints=CA:FALSE',
-        '-addext', 'keyUsage=critical,digitalSignature,keyEncipherment',
-        '-addext', 'extendedKeyUsage=serverAuth',
-        '-addext', 'subjectKeyIdentifier=hash',
-        '-addext', 'authorityKeyIdentifier=keyid,issuer:always',
-        '-out', f'issuingca/certs/{cert_name}.cert.pem',
+    import os
+    import tempfile
+    # Write CA-added extensions to a temp file; -addext is not supported
+    # by all OpenSSL 3.x builds when combined with x509 -req.
+    ext_content = (
+        "[ext]\n"
+        "basicConstraints=CA:FALSE\n"
+        "keyUsage=critical,digitalSignature,keyEncipherment\n"
+        "extendedKeyUsage=serverAuth\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid,issuer:always\n"
     )
+    fd, ext_file = tempfile.mkstemp(suffix='.cnf')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(ext_content)
+        return runssl(
+            'x509', '-req',
+            '-in', f'issuingca/csr/{cert_name}.csr.pem',
+            '-CA', 'issuingca/certs/issuing.cert.pem',
+            '-CAkey', 'issuingca/private/issuing.key.pem',
+            '-CAserial', 'issuingca/serial',
+            '-passin', f'pass:{issuing_password}',
+            '-copy_extensions', 'copy',
+            '-days', '200', '-sha256',
+            '-extfile', ext_file,
+            '-extensions', 'ext',
+            '-out', f'issuingca/certs/{cert_name}.cert.pem',
+        )
+    finally:
+        os.unlink(ext_file)
 
 def verify_certificate(cert_name):
     cert_path = f'issuingca/certs/{cert_name}.cert.pem'

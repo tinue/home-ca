@@ -1,6 +1,5 @@
 ---
 opensslpath: /opt/homebrew/bin/openssl # Path to openssl
-domain: example.com # Name of the domain for which the certificates are issued
 domains:
   - example.com
   - dmz.example.com

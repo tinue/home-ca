@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 import openssl
+from variables import _PROJECT_ROOT
 
 
 def setup():
@@ -21,27 +22,27 @@ def setup():
 
 
 def _configure():
-    """Phase 1: ensure defaults.yaml exists and is configured.
+    """Phase 1: ensure defaults.yaml exists and is configured."""
+    os.chdir(_PROJECT_ROOT)
 
-    Must run before setup() so that setup() loads the user's values,
-    not the example fallback. Computes the project root independently
-    from the script location so it works from any working directory.
-    """
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(project_root)
+    defaults_path = os.path.join(_PROJECT_ROOT, 'defaults.yaml')
+    example_path  = os.path.join(_PROJECT_ROOT, 'defaults_example.yaml')
 
-    defaults_path = 'defaults.yaml'
     if os.path.exists(defaults_path):
-        print(f'{defaults_path} already exists — skipping configuration step.')
+        print('defaults.yaml already exists — skipping configuration step.')
         return
 
-    print(f'{defaults_path} not found. Copying from defaults_example.yaml...')
-    shutil.copy('defaults_example.yaml', defaults_path)
+    print('defaults.yaml not found. Copying from defaults_example.yaml...')
+    shutil.copy(example_path, defaults_path)
 
     editor = os.environ.get('VISUAL', os.environ.get('EDITOR', 'vi'))
-    print(f'Opening {defaults_path} in {editor}...')
-    print('Edit the file, save, and close the editor to continue.')
+    print(f'Opening defaults.yaml in {editor}...')
     subprocess.call([editor, defaults_path])
+
+    print()
+    print('Edit defaults.yaml to match your environment, then re-run:')
+    print('  python initca.py')
+    sys.exit(0)
 
 
 def _create_directory_structure():

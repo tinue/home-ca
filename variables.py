@@ -2,45 +2,49 @@
 # (c) Martin Erzberger 2025-2026
 # Wraps shared variables, reading the values from a config file
 
+import os
+import yaml
+
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
 class Variables:
-    import os
-    import yaml
+    def __init__(self):
+        defaults_path = os.path.join(_PROJECT_ROOT, 'defaults.yaml')
+        example_path  = os.path.join(_PROJECT_ROOT, 'defaults_example.yaml')
 
-    # Load defaults from file
-    if os.path.exists('defaults.yaml'):
-        with open('defaults.yaml', 'r') as f:
-            defaults = yaml.full_load(f)
-    else:
-         print("Make a copy of defaults_example.yaml to defaults.yaml and adapt the file to your needs!")
-         with open('defaults_example.yaml', 'r') as f:
-            defaults = yaml.full_load(f)       
-    
-    # Generic variables
-    opensslpath = defaults.get('opensslpath') # Path to OpenSSL
-    domain = defaults.get('domain') # Name of the domain for which the certificates are issued
-    domains = defaults.get('domains', [domain])  # fallback keeps backward compat
-    domainalias=defaults.get('domainalias') # Reverse version of the domain, used to name certain elements
-    zipfilename=defaults.get('zipfilename')
-    rootcaname=defaults.get('rootcaname')
-    issuingcaname=defaults.get('issuingcaname')
+        if os.path.exists(defaults_path):
+            with open(defaults_path, 'r') as f:
+                defaults = yaml.full_load(f)
+        else:
+            print("Make a copy of defaults_example.yaml to defaults.yaml and adapt the file to your needs!")
+            with open(example_path, 'r') as f:
+                defaults = yaml.full_load(f)
 
-    # Variables used to install certificates
-    dockerhost=defaults.get('dockerhost') # The machine in my homelab that provides Intel based docker services
-    dockerpihost=defaults.get('dockerpihost') # The Raspberry Pi in my homelab that provides ARM based docker services
-    dockerdir=defaults.get('dockerdir')
+        # Project root path
+        self.projectroot = _PROJECT_ROOT
 
-    # Project root path, calculated
-    projectroot=os.path.dirname(os.path.abspath(__file__)) # Project root path
+        # Generic variables
+        self.opensslpath   = defaults.get('opensslpath')
+        self.domains       = defaults.get('domains', [])
+        self.domain        = self.domains[0] if self.domains else None
+        self.domainalias   = defaults.get('domainalias')
+        self.zipfilename   = defaults.get('zipfilename')
+        self.rootcaname    = defaults.get('rootcaname')
+        self.issuingcaname = defaults.get('issuingcaname')
 
-    # Properties of the certificates
-    cert_properties={}
-    # The yaml parser creates a list of dicts with one entry per dict. Convert into a proper dict.
-    for entry in defaults.get('certproperties'):
-       cert_properties.update(entry)
-    country = cert_properties.get('country')
-    state = cert_properties.get('state')
-    city = cert_properties.get('city')
-    org = cert_properties.get('org')
-    orgunit = cert_properties.get('orgunit')
-    email = cert_properties.get('email')
+        # Variables used to install certificates
+        self.dockerhost   = defaults.get('dockerhost')
+        self.dockerpihost = defaults.get('dockerpihost')
+        self.dockerdir    = defaults.get('dockerdir')
 
+        # Properties of the certificates
+        cert_properties = {}
+        for entry in defaults.get('certproperties'):
+            cert_properties.update(entry)
+        self.country = cert_properties.get('country')
+        self.state   = cert_properties.get('state')
+        self.city    = cert_properties.get('city')
+        self.org     = cert_properties.get('org')
+        self.orgunit = cert_properties.get('orgunit')
+        self.email   = cert_properties.get('email')

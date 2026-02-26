@@ -65,16 +65,16 @@ Copy `defaults_example.yaml` to `defaults.yaml` and edit it to match your enviro
 python initca.py
 ```
 
-This single command handles the full setup:
+Run this command once, and again after editing the configuration:
 
-1. If `defaults.yaml` does not yet exist, it is copied from `defaults_example.yaml` and opened
-   in your editor (`$VISUAL` / `$EDITOR` / vi). Edit and save the file, then close the editor
-   to continue.
-2. The CA directory structure is created (`rootca/`, `issuingca/` and all subdirectories).
-3. Root CA and Issuing CA keys and certificates are generated.
+1. **First run** — if `defaults.yaml` does not yet exist, it is copied from `defaults_example.yaml`
+   and opened in your editor (`$VISUAL` / `$EDITOR` / vi). The script then exits so you can
+   finish editing (necessary for GUI editors that return immediately).
+2. **Second run** — once `defaults.yaml` is in place, the CA directory structure is created
+   and Root CA and Issuing CA keys and certificates are generated.
 
-If any of these steps have already been completed, they are skipped safely — the script can
-be re-run without overwriting existing keys.
+Steps that have already been completed are skipped safely — the script can be re-run without
+overwriting existing keys.
 
 Passwords for the Root CA and Issuing CA private keys are each asked twice for confirmation.
 Use a password manager to generate and store them. After finishing, the following files exist:
@@ -98,7 +98,7 @@ python gencert.py [-d DOMAIN] [-H HOST] [-s SAN] [-m]
 
 | Option | Description |
 |---|---|
-| `-d DOMAIN` | Domain to issue cert for (default: first entry in `defaults.yaml`). Choices are validated against the `domains` list. |
+| `-d DOMAIN` | Domain to issue cert for (default: first entry in the `domains` list). Choices are validated against that list. |
 | `-H HOST` | Hostname, or `*` for wildcard (default: `*`) |
 | `-s SAN` | Extra SAN entry, repeatable |
 | `-m` | Multi-domain: add all other configured domains as additional SANs |
