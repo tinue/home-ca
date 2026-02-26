@@ -1,6 +1,10 @@
 ---
 opensslpath: /opt/homebrew/bin/openssl # Path to openssl
 domain: example.com # Name of the domain for which the certificates are issued
+domains:
+  - example.com
+  - dmz.example.com
+  - other.example.com
 domainalias: com.example # Reverse version of the domain, used to name certain elements
 dockerhost: docker # The machine in my homelab that provides Intel based docker services
 dockerpihost: dockerpi # The Raspberry Pi in my homelab that provides ARM based docker services

@@ -1,79 +1,170 @@
 # Certification Authority for home use
-For some use cases, self created SSL certificates are necessary. If you don't know why you need
-such certificates, then most probably you don't need them. You should go ahead and use
-e.g. Let's Encrypt.
 
-If you know what you are doing, then this collection of scripts and config files helps in
+For some use cases, self-signed SSL certificates are necessary. If you don't know why you need
+such certificates, you most probably don't — consider [Let's Encrypt](https://letsencrypt.org)
+instead.
+
+If you know what you are doing, this collection of scripts and configuration files helps in
 operating a small home-use certification authority.
 
 # Preconditions
-The scripts are built for openssl. They were developed on a Mac, with openssl@1.1 installed via
-homebrew. They should work fine on any Linux system, if you adapt the path to the openssl command
-in the script. The scripts are not tested in Windows, but I suspect they work fine in WSL, e.g.
-with Ubuntu.
+
+**OpenSSL 3.x** is required. On macOS, install via Homebrew (`brew install openssl`) and set
+the path in both configuration files (see below). The scripts were developed on macOS but should
+work on any Linux system. Not tested on Windows, but should work in WSL.
+
+**Python 3.x** is required for the Python scripts. The only third-party dependency is
+[PyYAML](https://pypi.org/project/PyYAML/). All other imports (`argparse`, `getpass`, `os`,
+`shutil`, `subprocess`, `zipfile`, …) are part of the Python standard library.
+
+# Setting up the Python environment
+
+## Option A — pip + venv
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate      # macOS / Linux
+# .venv\Scripts\activate       # Windows / WSL cmd
+
+pip install -r requirements.txt
+```
+
+## Option B — uv
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package and project manager.
+Install it once if not already present:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then set up the environment:
+
+```sh
+uv venv                                 # creates .venv/
+source .venv/bin/activate               # macOS / Linux
+uv pip install -r requirements.txt
+```
+
+Alternatively, skip the explicit activation and prefix every command with `uv run`:
+
+```sh
+uv run python gencert.py
+uv run python backup.py
+```
+
+# Configuration
+
+`defaults.yaml` controls all scripts. It is gitignored and must never be committed.
+Copy `defaults_example.yaml` to `defaults.yaml` and edit it to match your environment
+(or simply run `python initca.py`, which does this automatically).
 
 # One-time setup
 
-## Step one: Customize
-Use `./init.sh`.  
-This should open your default visual editor with the file `variables.sh` opened.
-If this didn't work, open the file yourself with your editor of choice.  
-Go through the entire file and set your desired values. After you are finished, I recommend to run `./cleanup.sh`
-to get rid of any previous residues.  
-Attention: `init` will reset your customized `variables.sh` file. 
-Even worse: `cleanup` will delete all of your certificates! You have to start from scratch
-afterwards.
+```sh
+python initca.py
+```
 
-## Step two: Create the certificates for the CA
-Use `./generatecacerts.sh`.  
-The password for the two private keys is asked only once. If you mistype, you won't realize it! 
-I recommend to generate and store the passwords with a password manager, and then copy/paste it.  
-After finishing, the certificates will be there:
-* Root certificate: `rootca/certs/ca.cert.pem`
-* Root private key: `rootca/private/ca.key.pem`
-* Issuing certificate: `issuingca/certs/issuing.cert.pem`
-* Issuing private key: `issuingca/private/issuing.key.pem`
+This single command handles the full setup:
 
-Now would be a good time to run `backup.sh`.
+1. If `defaults.yaml` does not yet exist, it is copied from `defaults_example.yaml` and opened
+   in your editor (`$VISUAL` / `$EDITOR` / vi). Edit and save the file, then close the editor
+   to continue.
+2. The CA directory structure is created (`rootca/`, `issuingca/` and all subdirectories).
+3. Root CA and Issuing CA keys and certificates are generated.
 
-# Issue server certificates
-Server certificates are created with `generateservercert.sh <host>`. After creation, the files are here:
-* Certificate: `issuingca/certs/`
-* Private key: `issuingca/private/`
+If any of these steps have already been completed, they are skipped safely — the script can
+be re-run without overwriting existing keys.
 
-There will be an unencrypted key, because this is usually what you need on a server (e.g. on
-a Synology DSM, or on a VMWare ESXi virtualizer). Make sure to delete the open keys after importing!
-If you need to re-import later, use `decryptkey.sh` to create another open key.
+Passwords for the Root CA and Issuing CA private keys are each asked twice for confirmation.
+Use a password manager to generate and store them. After finishing, the following files exist:
 
-# Renew server certificates
-Server certificates are renewed with `renewservercert.sh <host>`. After renewal, the files are here:
-* Certificate: `issuingca/certs/`
-* Private key: `issuingca/private/`
+| File | Description |
+|---|---|
+| `rootca/certs/ca.cert.pem` | Root CA certificate (import this into your devices/browsers) |
+| `rootca/private/ca.key.pem` | Root CA private key — keep offline and secure |
+| `issuingca/certs/issuing.cert.pem` | Issuing CA certificate |
+| `issuingca/private/issuing.key.pem` | Issuing CA private key |
 
-There will be an unencrypted key, because this is usually what you need on a server (e.g. on
-a Synology DSM, or on a VMWare ESXi virtualizer). Make sure to delete the open keys after importing!
-If you need to re-import later, use `decryptkey.sh` to create another open key.
+This is a good time to run `python backup.py`.
+
+# Issuing and renewing server certificates
+
+All certificate operations are handled by a single script:
+
+```
+python gencert.py [-d DOMAIN] [-H HOST] [-s SAN] [-m]
+```
+
+| Option | Description |
+|---|---|
+| `-d DOMAIN` | Domain to issue cert for (default: first entry in `defaults.yaml`). Choices are validated against the `domains` list. |
+| `-H HOST` | Hostname, or `*` for wildcard (default: `*`) |
+| `-s SAN` | Extra SAN entry, repeatable |
+| `-m` | Multi-domain: add all other configured domains as additional SANs |
+
+The script auto-detects whether a certificate already exists and switches between **create** and
+**renew** automatically. Renewal reuses the existing private key.
+
+Certificates are issued with a **200-day validity** (the maximum permitted by the CA/Browser
+Forum, effective 2026). Plan to renew every ~6 months. Use `python showexpiries.py` to monitor
+expiry dates across all issued certificates.
+
+After each run, an unencrypted private key is written to
+`issuingca/private/<name>.key.open.pem` for deployment.
+**Delete this file immediately after importing it to the target system.**
+
+### Cert modes
+
+| Mode | Command | CN | SANs |
+|---|---|---|---|
+| Wildcard | `python gencert.py` | `*.domain` | `*.domain`, `domain` |
+| Single host | `python gencert.py -H myserver` | `myserver.domain` | `myserver.domain` |
+| Extra SANs | `python gencert.py -H myserver -s myserver.local` | `myserver.domain` | `myserver.domain`, `myserver.local` |
+| Multi-domain | `python gencert.py -H myserver -m` | `myserver.domain` | `myserver.domain` + all other domains |
+
+### Examples
+
+```sh
+# Wildcard cert for the default domain (create or renew)
+python gencert.py
+
+# Wildcard cert for a secondary domain
+python gencert.py -d dmz.example.com
+
+# Single-host cert
+python gencert.py -H myserver
+
+# Single-host cert with additional SANs
+python gencert.py -H myserver -s myserver.local -s localhost
+
+# Multi-domain cert covering all configured domains
+python gencert.py -H everest -m
+```
+
+# Utilities
+
+| Script | Description |
+|---|---|
+| `python showexpiries.py` | Lists expiry dates of all issued certificates |
+| `python backup.py [FILE]` | Creates a compressed ZIP of all keys and certificates (excludes unencrypted keys); FILE defaults to the configured backup filename |
+| `python backup.py --restore [FILE]` | Restores from a ZIP backup and resets file permissions; FILE defaults to the configured backup filename |
+| `python cleanup.py` | Removes all issued certificates and keys while keeping the CA intact; useful when changing domain names |
+| `python cleanup.py --full` | **Destructive**: deletes everything including CA keys and certificates; re-run `python initca.py` afterwards |
+| `python decryptkey.py [-d DOMAIN] [-H HOST]` | Re-decrypts a certificate's private key — use if the deployment key was already deleted |
+| `python installcerts.py` | Deploys certificates to target servers; **highly specific to your infrastructure**, use as a template |
 
 # References
-A very big help was this document:
-https://jamielinux.com/docs/openssl-certificate-authority/introduction.html
+
+- [OpenSSL Certificate Authority](https://jamielinux.com/docs/openssl-certificate-authority/introduction.html)
 
 # TODO
-* Sign a 3rd party CSR
 
-# Extra scripts
-* `test.sh`: Ignore this, it's used to test shell / script commands
-* `decryptkey.sh`: Removes the encryption from a private key. This is often necessary when the key
-has to be installed on a server
-* `copyesxi.sh`: Copies the necessary certificates to a VMWare ESXi server into the correct directories
-* `backup.sh`: This is the only bash script in the collection; It creates a zip file with all the
-keys and certificates in it.
-* `cleanup.sh`: Performs a complete reset; All certificates and keys will be deleted, including the
-root CA. It's usually used during the test phase.
-* `cleanup-clientcertsonly.sh`: Keeps the root/issuing CA intact, and cleans all certificates. I used
-this when I changed the internal domain name, and needed to re-issue all of the server certificates.
+- Sign a 3rd-party CSR
 
 # History
-* &#x200B;19. October 2019: Initial version
-* &#x200B;14. January 2022: Add certificate renewal
 
+- October 2019: Initial version
+- January 2022: Certificate renewal
+- 2025: Rewrite to Python
+- February 2026: Unified `gencert.py` replaces individual cert generation scripts; `initca.py` replaces `generatecacerts.sh` and `init.sh` for the Python workflow; internal information removed from repository

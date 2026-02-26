@@ -1,5 +1,5 @@
 # OpenSSL root CA configuration file.
-# Copy to `/Users/me/remote/home/root/ca/openssl.cnf`.
+# Copy to the root CA machine before generating CA certificates.
 
 [ ca ]
 # `man ca`

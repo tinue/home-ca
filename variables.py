@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# (c) Martin Erzberger 2025
+# (c) Martin Erzberger 2025-2026
 # Wraps shared variables, reading the values from a config file
 
 class Variables:
@@ -18,6 +18,7 @@ class Variables:
     # Generic variables
     opensslpath = defaults.get('opensslpath') # Path to OpenSSL
     domain = defaults.get('domain') # Name of the domain for which the certificates are issued
+    domains = defaults.get('domains', [domain])  # fallback keeps backward compat
     domainalias=defaults.get('domainalias') # Reverse version of the domain, used to name certain elements
     zipfilename=defaults.get('zipfilename')
     rootcaname=defaults.get('rootcaname')

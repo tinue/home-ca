@@ -20,3 +20,5 @@ index.txt*
 certbackup.zip
 *.pyc
 /__pycache__
+/venv/
+/.venv/
