@@ -2,7 +2,8 @@
 # (c) Martin Erzberger 2026
 # Clean up CA directories.
 # Default: remove issued certificates only, keeping the CA intact.
-# --full: complete reset including CA keys and certificates.
+# --full: complete reset including CA keys, certificates, and database files.
+# --clobber: like --full, but also removes defaults.yaml.
 
 import argparse
 import glob
@@ -40,13 +41,7 @@ def _reset_dir(dirpath):
 
 def _init_database(ca_dir, has_crlnumber=False):
     """Remove existing database files and reinitialise them."""
-    for f in glob.glob(os.path.join(ca_dir, 'index.txt*')):
-        os.remove(f)
-    for name in (['serial', 'crlnumber'] if has_crlnumber else ['serial']):
-        path = os.path.join(ca_dir, name)
-        if os.path.exists(path):
-            os.remove(path)
-
+    _remove_database(ca_dir, has_crlnumber)
     with open(os.path.join(ca_dir, 'index.txt'), 'w'):
         pass
     with open(os.path.join(ca_dir, 'serial'), 'w') as f:
@@ -56,6 +51,21 @@ def _init_database(ca_dir, has_crlnumber=False):
             f.write('1000\n')
     print(f'  reset   {ca_dir}/index.txt, serial' +
           (', crlnumber' if has_crlnumber else ''))
+
+
+def _remove_database(ca_dir, has_crlnumber=False):
+    """Remove database files without recreating them."""
+    removed = []
+    for f in glob.glob(os.path.join(ca_dir, 'index.txt*')):
+        os.remove(f)
+        removed.append(os.path.basename(f))
+    for name in (['serial', 'crlnumber'] if has_crlnumber else ['serial']):
+        path = os.path.join(ca_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+            removed.append(name)
+    if removed:
+        print(f'  removed {ca_dir}/{{{", ".join(removed)}}}')
 
 
 def cleanup_certs():
@@ -70,19 +80,30 @@ def cleanup_certs():
 
 
 def cleanup_full():
-    """Full reset: wipe everything and rebuild an empty CA structure."""
+    """Full reset: wipe everything including CA keys, certificates, and database files."""
     for d in ['certs', 'crl', 'newcerts', 'private']:
         _reset_dir(f'rootca/{d}')
     os.chmod('rootca/private', 0o700)
-    _init_database('rootca')
+    _remove_database('rootca')
 
     for d in ['certs', 'crl', 'csr', 'newcerts', 'private']:
         _reset_dir(f'issuingca/{d}')
     os.chmod('issuingca/private', 0o700)
-    _init_database('issuingca', has_crlnumber=True)
+    _remove_database('issuingca', has_crlnumber=True)
 
     print()
     print('Full reset complete. Run python initca.py to regenerate the CA.')
+
+
+def cleanup_clobber():
+    """Clobber: full reset plus delete defaults.yaml."""
+    cleanup_full()
+    path = 'defaults.yaml'
+    if os.path.exists(path):
+        os.remove(path)
+        print(f'  removed {path}')
+    print()
+    print('Clobber complete. Restore defaults.yaml before running python initca.py.')
 
 
 def main():
@@ -92,21 +113,37 @@ def main():
         epilog=(
             'Without --full (default): removes all issued certificates and keys\n'
             '  while keeping the CA keys and certificates intact.\n\n'
-            'With --full: complete reset — deletes everything including CA keys\n'
-            '  and certificates. Run python initca.py afterwards to regenerate.'
+            'With --full: complete reset — deletes everything including CA keys,\n'
+            '  certificates, and database files (serial, crlnumber, index.txt).\n'
+            '  Run python initca.py afterwards to regenerate.\n\n'
+            'With --clobber: everything --full does, plus deletes defaults.yaml.\n'
+            '  Restore defaults.yaml before running python initca.py.'
         ),
     )
     parser.add_argument(
         '--full',
         action='store_true',
-        help='Full reset: delete everything including CA keys and certificates',
+        help='Full reset: delete everything including CA keys, certificates, and database files',
+    )
+    parser.add_argument(
+        '--clobber',
+        action='store_true',
+        help='Like --full, but also deletes defaults.yaml',
     )
     args = parser.parse_args()
 
     setup()
 
-    if args.full:
-        print('WARNING: This will delete ALL certificates and keys, including the CA!')
+    if args.clobber:
+        print('WARNING: This will delete ALL certificates, keys, database files, AND defaults.yaml!')
+        answer = input('Are you sure? (y/N) ')
+        if answer.strip().lower() != 'y':
+            print('Aborted.')
+            sys.exit(0)
+        print()
+        cleanup_clobber()
+    elif args.full:
+        print('WARNING: This will delete ALL certificates, keys, and database files, including the CA!')
         answer = input('Are you sure? (y/N) ')
         if answer.strip().lower() != 'y':
             print('Aborted.')
