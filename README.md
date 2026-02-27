@@ -10,7 +10,7 @@ operating a small home-use certification authority.
 # Preconditions
 
 **OpenSSL 3.x** is required. On macOS, install via Homebrew (`brew install openssl`) and set
-the path in both configuration files (see below). The scripts were developed on macOS but should
+the path in `lib/defaults.yaml` (see below). The scripts were developed on macOS but should
 work on any Linux system. Not tested on Windows, but should work in WSL.
 
 **Python 3.x** is required for the Python scripts. The only third-party dependency is
@@ -152,7 +152,7 @@ python gencert.py -H everest -m
 | `python backup.py --restore [FILE]` | Restores from a ZIP backup and resets file permissions; FILE defaults to the configured backup filename |
 | `python cleanup.py` | Removes all issued certificates and keys while keeping the CA intact; useful when changing domain names |
 | `python cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `python initca.py` afterwards |
-| `python cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `defaults.yaml`; restore it from `defaults_example.yaml` before re-running `python initca.py` |
+| `python cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `python initca.py` to recreate it from the example file |
 | `python decryptkey.py [-d DOMAIN] [-H HOST]` | Re-decrypts a certificate's private key — use if the deployment key was already deleted |
 | `python installcerts.py` | Deploys certificates to target servers; **highly specific to your infrastructure**, use as a template |
 
