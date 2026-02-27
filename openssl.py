@@ -2,14 +2,11 @@
 # (c) Martin Erzberger 2025-2026
 # Wrapper for OpenSSL commands
 
-# This part needs to be duplicated in each script
 def setup():
   global variables
   from common import setup
   variables = setup()
 
-def version():
-    return runssl('--version')
 
 def validity(certificate):
    cert_dump = runssl('x509', '-noout', '-text', '-in', certificate)
@@ -20,14 +17,6 @@ def enddate(cert_path):
     output = runssl('x509', '-noout', '-enddate', '-in', cert_path)
     return output.split('=', 1)[1].strip()
 
-def signing_request(domain, key_password):
-  setup()
-  import os
-  import subprocess
-  # For this, we need to be in the 'issuingca' directory
-  output = runssl('req', '-newkey', 'rsa:2048', '-keyout', 'issuingca/private/'+domain+'.key.pem', '-config', 'issuingca/openssl.cnf', '-passout', 'pass:'+key_password, '-subj',
-         '/CN=*.'+domain, '-addext', 'subjectAltName=DNS.1:*.'+domain+',DNS.2:'+domain, '-new', '-sha256', '-out', 'issuingca/csr/'+domain+'.csr.pem')
-  print(output)
 
 def runssl(*args):
   setup()
@@ -57,9 +46,9 @@ def cert_validity_text(cert_path):
                 break
     return '\n'.join(result)
 
-def signing_request_new(cert_name, cn, san_string, key_password):
+def signing_request(cert_name, cn, san_string, key_password):
     return runssl(
-        'req', '-newkey', 'rsa:2048',
+        'req', '-newkey', 'rsa:4096',
         '-keyout', f'issuingca/private/{cert_name}.key.pem',
         '-passout', f'pass:{key_password}',
         '-subj', f'/CN={cn}',
@@ -179,3 +168,44 @@ def verify_chain(ca_cert_path, cert_path):
         '-CAfile', ca_cert_path,
         cert_path,
     )
+
+
+def subject_cn(cert_path):
+    """Return the CN from the certificate subject, or an empty string."""
+    import re
+    output = runssl('x509', '-noout', '-subject', '-in', cert_path)
+    m = re.search(r'\bCN\s*=\s*(.+?)(?:\s*[,/]|\s*$)', output.strip())
+    return m.group(1).strip() if m else ''
+
+
+def _parse_ext_lines(output):
+    """Extract the value lines from an 'openssl x509 -ext ...' block."""
+    lines = []
+    for line in output.strip().splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith('X509v3'):
+            lines.append(stripped)
+    return lines
+
+
+def san_list(cert_path):
+    """Return SANs as a list of strings, e.g. ['DNS:*.example.com', ...]."""
+    output = runssl('x509', '-noout', '-ext', 'subjectAltName', '-in', cert_path)
+    entries = []
+    for line in _parse_ext_lines(output):
+        entries.extend(e.strip() for e in line.split(',') if e.strip())
+    return entries
+
+
+def key_usage(cert_path):
+    """Return the Key Usage value string, or None if not present."""
+    output = runssl('x509', '-noout', '-ext', 'keyUsage', '-in', cert_path)
+    lines = _parse_ext_lines(output)
+    return ', '.join(lines) if lines else None
+
+
+def extended_key_usage(cert_path):
+    """Return the Extended Key Usage value string, or None if not present."""
+    output = runssl('x509', '-noout', '-ext', 'extendedKeyUsage', '-in', cert_path)
+    lines = _parse_ext_lines(output)
+    return ', '.join(lines) if lines else None

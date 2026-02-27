@@ -9,10 +9,6 @@ def setup():
   from variables import Variables
   
   my_vars = Variables()
-  
-  #os.chdir(variables.get('projectroot')) # Make sure to be in the project root directory when a script is executed
-  # Set Env Variables for OpenSSL
-  # os.environ["PROJECTROOT"] = variables.projectroot
   os.environ["COUNTRY"] = my_vars.country
   os.environ["STATE"] = my_vars.state
   os.environ["CITY"] = my_vars.city

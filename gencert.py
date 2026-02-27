@@ -120,7 +120,7 @@ def main():
     if is_renewal:
         openssl.signing_request_renew(cert_name, cn, san_string, key_password)
     else:
-        openssl.signing_request_new(cert_name, cn, san_string, key_password)
+        openssl.signing_request(cert_name, cn, san_string, key_password)
 
     # Sign the certificate
     openssl.sign_certificate(cert_name, issuing_password)
