@@ -31,14 +31,17 @@ def backup(zip_path):
     files_to_backup.update(walk_directory("issuingca/certs/", variables.projectroot))
     files_to_backup.update(walk_directory("issuingca/private/", variables.projectroot))
     # Add personal config file (gitignored, not recoverable from source control)
-    files_to_backup.add("defaults.yaml")
+    files_to_backup.add("lib/defaults.yaml")
 
     # Make the zip file
     if os.path.exists(zip_path):
         os.remove(zip_path)
     with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_BZIP2) as myzip:
         for entry in sorted(files_to_backup):
-            myzip.write(entry)
+            if os.path.exists(entry):
+                myzip.write(entry)
+            else:
+                print(f'Warning: {entry} not found — skipping.')
         archived = myzip.namelist()
 
     # Protect the zip file
@@ -119,10 +122,24 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    setup()
-
-    zip_path = args.file or variables.zipfilename
     if args.restore:
+        # Restore must work even when defaults.yaml is absent (it may be what
+        # we are restoring). Only _PROJECT_ROOT is needed; it is computed from
+        # __file__ and requires no config file.
+        from lib.variables import _PROJECT_ROOT, _LIB_DIR
+        os.chdir(_PROJECT_ROOT)
+        if args.file:
+            zip_path = args.file
+        elif os.path.exists(os.path.join(_LIB_DIR, 'defaults.yaml')):
+            # defaults.yaml is present — read the configured backup filename.
+            setup()
+            zip_path = variables.zipfilename
+        else:
+            print('Error: no ZIP filename given and lib/defaults.yaml is missing.')
+            print('Specify the ZIP file explicitly: python backup.py --restore FILE')
+            sys.exit(1)
         restore(zip_path)
     else:
+        setup()
+        zip_path = args.file or variables.zipfilename
         backup(zip_path)

@@ -13,10 +13,8 @@ import sys
 
 
 def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
+    from lib.variables import _PROJECT_ROOT
+    os.chdir(_PROJECT_ROOT)
 
 
 def _clean_dir(dirpath, keep=None):
@@ -98,7 +96,7 @@ def cleanup_full():
 def cleanup_clobber():
     """Clobber: full reset plus delete defaults.yaml."""
     cleanup_full()
-    path = 'defaults.yaml'
+    path = 'lib/defaults.yaml'
     if os.path.exists(path):
         os.remove(path)
         print(f'  removed {path}')

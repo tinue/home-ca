@@ -15,7 +15,7 @@ class Variables:
         defaults_path = os.path.join(_LIB_DIR, 'defaults.yaml')
 
         if not os.path.exists(defaults_path):
-            sys.exit("lib/defaults.yaml not found. Run python initca.py to create it.")
+            sys.exit(f"{defaults_path} not found. Run python initca.py to create it.")
 
         with open(defaults_path, 'r') as f:
             defaults = yaml.full_load(f)
