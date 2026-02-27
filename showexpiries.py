@@ -6,7 +6,7 @@ import locale
 import os
 from datetime import datetime, timezone
 
-import openssl
+from lib import openssl
 
 try:
     locale.setlocale(locale.LC_TIME, '')
@@ -16,7 +16,7 @@ except locale.Error:
 
 def setup():
     global variables
-    from common import setup as common_setup
+    from lib.common import setup as common_setup
     variables = common_setup()
     os.chdir(variables.projectroot)
 

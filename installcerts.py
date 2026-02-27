@@ -12,7 +12,7 @@ import sys
 
 def setup():
     global variables
-    from common import setup as common_setup
+    from lib.common import setup as common_setup
     variables = common_setup()
     os.chdir(variables.projectroot)
 

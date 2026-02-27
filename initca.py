@@ -9,13 +9,13 @@ import shutil
 import subprocess
 import sys
 
-import openssl
-from variables import _PROJECT_ROOT
+from lib import openssl
+from lib.variables import _PROJECT_ROOT, _LIB_DIR
 
 
 def setup():
     global variables
-    from common import setup as common_setup
+    from lib.common import setup as common_setup
     variables = common_setup()
     os.chdir(variables.projectroot)
     os.environ["PROJECTROOT"] = variables.projectroot
@@ -25,8 +25,8 @@ def _configure():
     """Phase 1: ensure defaults.yaml exists and is configured."""
     os.chdir(_PROJECT_ROOT)
 
-    defaults_path = os.path.join(_PROJECT_ROOT, 'defaults.yaml')
-    example_path  = os.path.join(_PROJECT_ROOT, 'defaults_example.yaml')
+    defaults_path = os.path.join(_LIB_DIR, 'defaults.yaml')
+    example_path  = os.path.join(_LIB_DIR, 'defaults_example.yaml')
 
     if os.path.exists(defaults_path):
         print('defaults.yaml already exists — skipping configuration step.')

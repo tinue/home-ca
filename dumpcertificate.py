@@ -5,12 +5,12 @@
 import os
 import sys
 
-import openssl
+from lib import openssl
 
 
 def setup():
     global variables
-    from common import setup as common_setup
+    from lib.common import setup as common_setup
     variables = common_setup()
     os.chdir(variables.projectroot)
     os.environ["PROJECTROOT"] = variables.projectroot

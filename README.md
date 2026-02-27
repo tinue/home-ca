@@ -55,8 +55,8 @@ uv run python backup.py
 
 # Configuration
 
-`defaults.yaml` controls all scripts. It is gitignored and must never be committed.
-Copy `defaults_example.yaml` to `defaults.yaml` and edit it to match your environment
+`lib/defaults.yaml` controls all scripts. It is gitignored and must never be committed.
+Copy `lib/defaults_example.yaml` to `lib/defaults.yaml` and edit it to match your environment
 (or simply run `python initca.py`, which does this automatically).
 
 # One-time setup
@@ -67,10 +67,10 @@ python initca.py
 
 Run this command once, and again after editing the configuration:
 
-1. **First run** — if `defaults.yaml` does not yet exist, it is copied from `defaults_example.yaml`
+1. **First run** — if `lib/defaults.yaml` does not yet exist, it is copied from `lib/defaults_example.yaml`
    and opened in your editor (`$VISUAL` / `$EDITOR` / vi). The script then exits so you can
    finish editing (necessary for GUI editors that return immediately).
-2. **Second run** — once `defaults.yaml` is in place, the CA directory structure is created
+2. **Second run** — once `lib/defaults.yaml` is in place, the CA directory structure is created
    and Root CA and Issuing CA keys and certificates are generated.
 
 Steps that have already been completed are skipped safely — the script can be re-run without

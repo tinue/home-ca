@@ -6,15 +6,16 @@ import os
 import sys
 import yaml
 
-_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_LIB_DIR      = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_LIB_DIR)
 
 
 class Variables:
     def __init__(self):
-        defaults_path = os.path.join(_PROJECT_ROOT, 'defaults.yaml')
+        defaults_path = os.path.join(_LIB_DIR, 'defaults.yaml')
 
         if not os.path.exists(defaults_path):
-            sys.exit("defaults.yaml not found. Copy defaults_example.yaml to defaults.yaml and adapt it to your needs.")
+            sys.exit("lib/defaults.yaml not found. Run python initca.py to create it.")
 
         with open(defaults_path, 'r') as f:
             defaults = yaml.full_load(f)

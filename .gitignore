@@ -8,7 +8,7 @@ Thumbs.db
 *.code-workspace
 *.iml
 # Project specific
-/defaults.yaml
+/lib/defaults.yaml
 certs/
 crl/
 csr/

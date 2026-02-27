@@ -6,7 +6,7 @@
 def setup():
   import os
   import yaml
-  from variables import Variables
+  from .variables import Variables
   
   my_vars = Variables()
   os.environ["COUNTRY"] = my_vars.country

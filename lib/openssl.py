@@ -4,7 +4,7 @@
 
 def setup():
   global variables
-  from common import setup
+  from .common import setup
   variables = setup()
 
 
