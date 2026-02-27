@@ -3,6 +3,7 @@
 # Wraps shared variables, reading the values from a config file
 
 import os
+import sys
 import yaml
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -11,15 +12,12 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 class Variables:
     def __init__(self):
         defaults_path = os.path.join(_PROJECT_ROOT, 'defaults.yaml')
-        example_path  = os.path.join(_PROJECT_ROOT, 'defaults_example.yaml')
 
-        if os.path.exists(defaults_path):
-            with open(defaults_path, 'r') as f:
-                defaults = yaml.full_load(f)
-        else:
-            print("Make a copy of defaults_example.yaml to defaults.yaml and adapt the file to your needs!")
-            with open(example_path, 'r') as f:
-                defaults = yaml.full_load(f)
+        if not os.path.exists(defaults_path):
+            sys.exit("defaults.yaml not found. Copy defaults_example.yaml to defaults.yaml and adapt it to your needs.")
+
+        with open(defaults_path, 'r') as f:
+            defaults = yaml.full_load(f)
 
         # Project root path
         self.projectroot = _PROJECT_ROOT
