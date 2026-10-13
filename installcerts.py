@@ -6,23 +6,22 @@
 # Use it as an example for your own servers and services.
 
 import argparse
-import getpass
+import functools
 import hashlib
+import io
 import os
+import shlex
 import socket
 import ssl
 import subprocess
 import sys
+import tarfile
 import time
 
-from lib import expiry, onepassword, openssl, synology, unifi
+from lib import common, expiry, onepassword, openssl, synology, unifi
+from lib.common import HomeCAError, ISSUING_CERT, ROOT_CERT, cert_path, config
 
-
-def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
+KEYSTORE = ['-cacerts', '-storepass', 'changeit']   # the JDK truststore and its default password
 
 
 def _run(*args):
@@ -31,37 +30,46 @@ def _run(*args):
     subprocess.run(args, check=True)
 
 
+def _section(name):
+    """A deployment section of lib/defaults.yaml (synology, proxmox, unifi)."""
+    section = getattr(config(), name)
+    if not section:
+        raise HomeCAError(f'No {name} section in lib/defaults.yaml.')
+    return section
+
+
+@functools.cache
 def _key_pem(cert_name):
-    """Decrypt the certificate's private key in memory, with the password from 1Password."""
+    """Decrypt the certificate's private key in memory, once per run."""
     return openssl.decrypted_key(cert_name, onepassword.read_password(cert_name))
 
 
-def _leaf_pem(cert_path):
-    """Return the first certificate of a cert file (leaf + issuing CA)."""
-    with open(cert_path) as f:
-        return f.read().split('-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----\n'
-
-
-def _ssh_write(host, path, content):
-    """Write content to a file on host via ssh stdin, readable only by the owner."""
-    print(f'ssh {host} cat > {path}')
-    subprocess.run(['ssh', host, f'umask 077 && cat > {path}'], input=content, text=True, check=True)
+def _ssh_with_files(host, command, files):
+    """Run command on host with files ({name: (text, mode)}) as a tar stream on its stdin,
+    over one connection; returns the command's stdout."""
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w') as tar:
+        for name, (content, mode) in files.items():
+            data = content.encode()
+            info = tarfile.TarInfo(name)
+            info.size, info.mode, info.mtime = len(data), mode, int(time.time())
+            tar.addfile(info, io.BytesIO(data))
+    print(f'ssh {host} {command}')
+    return subprocess.run(['ssh', host, command], input=stream.getvalue(), stdout=subprocess.PIPE,
+                          check=True).stdout.decode()
 
 
 def install_docker_certs():
     """Copy wildcard certificate and key to the Docker host."""
-    fqdn = f'{variables.dockerhost}.{variables.domain}'
-    remote_dir = variables.dockerdir
-    cert_src = f'issuingca/certs/{variables.domain}.cert.pem'
-    key_pem  = _key_pem(variables.domain)
+    c = config()
+    fqdn = f'{c.dockerhost}.{c.domain}'
+    certs_dir = shlex.quote(f'{c.dockerdir}/certs')
+    with open(cert_path(c.domain)) as f:
+        cert_pem = f.read()
 
-    print(f'Installing wildcard certificate to {fqdn}:{remote_dir}/certs ...')
-    _run('ssh', fqdn, f'rm -rf {remote_dir}/certs')
-    _run('ssh', fqdn, f'mkdir -p {remote_dir}/certs')
-    _run('scp', cert_src, f'{fqdn}:{remote_dir}/certs/{variables.domain}.cert')
-    _ssh_write(fqdn, f'{remote_dir}/certs/{variables.domain}.key', key_pem)
-    _run('ssh', fqdn, f'chmod 444 {remote_dir}/certs/{variables.domain}.cert')
-    _run('ssh', fqdn, f'chmod 400 {remote_dir}/certs/{variables.domain}.key')
+    print(f'Installing wildcard certificate to {fqdn}:{c.dockerdir}/certs ...')
+    _ssh_with_files(fqdn, f'rm -rf {certs_dir} && mkdir -p {certs_dir} && tar -xpf - -C {certs_dir}',
+                    {f'{c.domain}.cert': (cert_pem, 0o444), f'{c.domain}.key': (_key_pem(c.domain), 0o400)})
     print('Done.')
 
 
@@ -73,36 +81,22 @@ def install_java_ca():
         return
 
     keytool = os.path.join(java_home, 'bin', 'keytool')
-    alias   = variables.domainalias
-    ca_cert = 'rootca/certs/ca.cert.pem'
+    alias   = config().domainalias
 
     print(f'Updating Java keystore (alias: {alias}) ...')
     # Replace an existing entry; a fresh truststore (e.g. after a JDK upgrade) has none
-    listed = subprocess.run([keytool, '-list', '-alias', alias, '-cacerts', '-storepass', 'changeit'],
-                            capture_output=True)
-    if listed.returncode == 0:
-        _run(keytool, '-delete', '-alias', alias, '-cacerts', '-storepass', 'changeit')
-    _run(keytool, '-importcert', '-alias', alias,
-         '-trustcacerts', '-noprompt',
-         '-cacerts', '-storepass', 'changeit',
-         '-file', ca_cert)
+    if subprocess.run([keytool, '-list', '-alias', alias, *KEYSTORE], capture_output=True).returncode == 0:
+        _run(keytool, '-delete', '-alias', alias, *KEYSTORE)
+    _run(keytool, '-importcert', '-alias', alias, '-trustcacerts', '-noprompt', *KEYSTORE, '-file', ROOT_CERT)
     print('Done.')
 
 
 def _synology_login():
     """Log in to DSM with the account from 1Password; the OTP comes from the same item."""
-    config = variables.synology
-    if not config:
-        sys.exit('No synology section in lib/defaults.yaml.')
-    login = config['login']
-
-    def otp():
-        code = onepassword.read_otp(login)
-        return code or input('DSM one-time password: ').strip()
-
-    dsm = synology.DSM(config['host'], config.get('port', 5001))
-    dsm.login(onepassword.read_field(f'{login}/username'),
-              onepassword.read_field(f'{login}/password'), otp)
+    section = _section('synology')
+    username, password, otp = onepassword.read_login(section['login'])
+    dsm = synology.DSM(section['host'], section.get('port', 5001))
+    dsm.login(username, password, lambda: otp or input('DSM one-time password: ').strip())
     return dsm
 
 
@@ -122,65 +116,57 @@ def list_synology_certs():
 
 def install_synology_certs():
     """Replace each configured certificate in DSM, matched by its common name."""
-    config = variables.synology
-    print(f'Installing certificates to DSM on {config["host"]} ...')
+    section = _section('synology')
+    print(f'Installing certificates to DSM on {section["host"]} ...')
     dsm = _synology_login()
     try:
         installed = dsm.certificates()
-        for cert_name in config['certificates']:
+        for cert_name in section['certificates']:
             _install_synology_cert(dsm, installed, cert_name)
     finally:
         dsm.logout()
 
 
 def _install_synology_cert(dsm, installed, cert_name):
-    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
-    cn = openssl.subject_cn(cert_path)
+    path = cert_path(cert_name)
+    cn = openssl.subject_cn(path)
 
     matches = [c for c in installed if c['subject'].get('common_name') == cn]
     if len(matches) != 1:
-        sys.exit(f'Expected one DSM certificate with CN {cn}, found {len(matches)}.\n'
-                 'Import it once in the DSM GUI, then re-run. List: uv run installcerts.py --list-synology')
+        raise HomeCAError(f'Expected one DSM certificate with CN {cn}, found {len(matches)}.\n'
+                          'Import it once in the DSM GUI, then re-run. List: uv run installcerts.py --list-synology')
     existing = matches[0]
 
-    key_pem = _key_pem(cert_name)
-    cert_pem = _leaf_pem(cert_path)   # DSM wants leaf and issuing CA separately
-    with open('issuingca/certs/issuing.cert.pem') as f:
+    with open(ISSUING_CERT) as f:
         chain_pem = f.read()
-
-    result = dsm.import_certificate(existing['id'], existing.get('desc', ''), key_pem, cert_pem,
-                                    chain_pem, existing.get('is_default', False))
+    # DSM wants leaf and issuing CA separately
+    result = dsm.import_certificate(existing['id'], existing.get('desc', ''), _key_pem(cert_name),
+                                    openssl.leaf_pem(path), chain_pem, existing.get('is_default', False))
     print(f'  {cn}: replaced (was valid until {existing.get("valid_till")})'
           + (', DSM restarts its web server' if result.get('restart_httpd') else ''))
 
 
 def install_proxmox_certs():
     """Install the configured certificate as pveproxy certificate on each Proxmox VE node."""
-    config = variables.proxmox
-    if not config:
-        sys.exit('No proxmox section in lib/defaults.yaml.')
-    cert_name = config['certificate']
-    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
-    key_pem = _key_pem(cert_name)
+    section = _section('proxmox')
+    cert_name = section['certificate']
+    with open(cert_path(cert_name)) as f:
+        files = {'cert.pem': (f.read(), 0o600), 'key.pem': (_key_pem(cert_name), 0o600)}
+    # pvenode cert set is the supported way; it writes /etc/pve/nodes/<node>/pveproxy-ssl.{pem,key}.
+    # The temporary copies go away even if a step fails; stdout only carries the node's FQDN.
+    command = ('t=$(mktemp -d) && trap \'rm -rf "$t"\' EXIT && tar -xf - -C "$t" && '
+               'pvenode cert set "$t/cert.pem" "$t/key.pem" --force 1 --restart 1 >&2 && hostname -f')
 
-    for node in config['nodes']:
+    for node in section['nodes']:
         print(f'Installing {cert_name} to Proxmox VE node {node} ...')
-        fqdn, tmp = subprocess.run(['ssh', node, 'hostname -f && mktemp -d'], capture_output=True,
-                                   text=True, check=True).stdout.split()
-        try:
-            _ssh_write(node, f'{tmp}/key.pem', key_pem)
-            _run('scp', '-q', cert_path, f'{node}:{tmp}/cert.pem')
-            # The supported way; it writes /etc/pve/nodes/<node>/pveproxy-ssl.{pem,key}
-            _run('ssh', node, f'pvenode cert set {tmp}/cert.pem {tmp}/key.pem --force 1 --restart 1')
-        finally:
-            subprocess.run(['ssh', node, f'rm -rf {tmp}'], check=True)
-        _verify_served(fqdn, 8006, cert_path)
+        fqdn = _ssh_with_files(node, command, files).strip()
+        _verify_served(fqdn, 8006, cert_path(cert_name))
 
 
-def _verify_served(host, port, cert_path, timeout=15):
-    """Check that host:port serves cert_path, trusted via our Root CA (waits for restarts)."""
-    leaf_der = ssl.PEM_cert_to_DER_cert(_leaf_pem(cert_path))
-    context = ssl.create_default_context(cafile='rootca/certs/ca.cert.pem')
+def _verify_served(host, port, path, timeout=15):
+    """Check that host:port serves the cert at path, trusted via our Root CA (waits for restarts)."""
+    leaf_der = ssl.PEM_cert_to_DER_cert(openssl.leaf_pem(path))
+    context = ssl.create_default_context(cafile=ROOT_CERT)
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -190,41 +176,41 @@ def _verify_served(host, port, cert_path, timeout=15):
             break
         except (OSError, ssl.SSLError) as e:
             if time.monotonic() > deadline:
-                sys.exit(f'  {host}:{port} not reachable with a trusted certificate: {e}')
+                raise HomeCAError(f'{host}:{port} not reachable with a trusted certificate: {e}')
             time.sleep(1)
     if served != leaf_der:
-        sys.exit(f'  {host}:{port} serves a different certificate than {cert_path}.')
-    print(f'  {host}:{port} serves it, valid until {openssl.enddate(cert_path)}')
+        raise HomeCAError(f'{host}:{port} serves a different certificate than {path}.')
+    print(f'  {host}:{port} serves it, valid until {openssl.enddate(path)}')
+
+
+def _hex(fingerprint):
+    """A fingerprint as plain lowercase hex, without separators."""
+    return ''.join(ch for ch in (fingerprint or '').lower() if ch in '0123456789abcdef')
 
 
 def install_unifi_cert():
     """Upload the configured certificate to the UniFi OS console, activate it, drop the old one."""
-    config = variables.unifi
-    if not config:
-        sys.exit('No unifi section in lib/defaults.yaml.')
-    host, cert_name, login = config['host'], config['certificate'], config['login']
-    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
-    with open(cert_path) as f:
+    section = _section('unifi')
+    host, cert_name, port = section['host'], section['certificate'], section.get('port', 443)
+    path = cert_path(cert_name)
+    with open(path) as f:
         chain_pem = f.read()   # leaf + issuing CA, as the console expects
-    leaf_der = ssl.PEM_cert_to_DER_cert(_leaf_pem(cert_path))
+    leaf_der = ssl.PEM_cert_to_DER_cert(openssl.leaf_pem(path))
     fingerprints = {hashlib.sha256(leaf_der).hexdigest(), hashlib.sha1(leaf_der).hexdigest()}
-    cn = openssl.subject_cn(cert_path)
+    cn = openssl.subject_cn(path)
 
     print(f'Installing {cert_name} to UniFi OS on {host} ...')
-    console = unifi.UniFiOS(host, config.get('port', 443))
-    console.login(onepassword.read_field(f'{login}/username'),
-                  onepassword.read_field(f'{login}/password'), onepassword.read_otp(login))
+    console = unifi.UniFiOS(host, port)
+    console.login(*onepassword.read_login(section['login']))
     try:
         installed = console.certificates()
         previous = [c for c in installed if c.get('active')]
-        same = [c for c in installed
-                if ''.join(ch for ch in (c.get('fingerprint') or '').lower() if ch in '0123456789abcdef')
-                in fingerprints]
+        same = [c for c in installed if _hex(c.get('fingerprint')) in fingerprints]
         if same:
             new = same[0]
             print(f'  already uploaded as "{new["name"]}"')
         else:
-            name = f'{cn} until {expiry.status(cert_path)[1]:%Y-%m-%d}'
+            name = f'{cn} until {expiry.enddate(path):%Y-%m-%d}'
             new = console.upload_certificate(name, chain_pem, _key_pem(cert_name))
             print(f'  uploaded as "{name}"')
         if not new.get('active'):
@@ -238,7 +224,7 @@ def install_unifi_cert():
                 print(f'  deleted the previous certificate "{old["name"]}"')
     finally:
         console.logout()
-    _verify_served(host, config.get('port', 443), cert_path)
+    _verify_served(host, port, path)
 
 
 TARGETS = {
@@ -256,19 +242,14 @@ def _run_target(target):
         TARGETS[target]()
     except subprocess.CalledProcessError as e:
         return f'command failed with exit code {e.returncode}: {" ".join(str(a) for a in e.cmd)}'
-    except (synology.DSMError, unifi.UniFiError) as e:
-        return e.args[0]
-    except RuntimeError as e:   # OpenSSL
+    except HomeCAError as e:
         return str(e)
-    except SystemExit as e:     # the targets exit with a message on expected problems
-        return None if e.code in (None, 0) else str(e.code)
     except Exception as e:      # anything unexpected, e.g. a missing config key or network error
         return f'{type(e).__name__}: {e}'
     return None
 
 
 def main():
-    setup()
     sys.stdout.reconfigure(line_buffering=True)   # keep our output in order with the commands'
     parser = argparse.ArgumentParser(
         description='Install certificates to their target systems.',
@@ -281,13 +262,7 @@ def main():
     args = parser.parse_args()
 
     if args.list_synology:
-        error = None
-        try:
-            list_synology_certs()
-        except synology.DSMError as e:
-            error = e.args[0]
-        if error:
-            sys.exit(f'Error: {error}')
+        list_synology_certs()
         return
 
     if not args.targets:
@@ -315,4 +290,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    common.run(main)

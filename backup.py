@@ -4,7 +4,6 @@
 
 import argparse
 import os
-import sys
 import tempfile
 import zipfile
 
@@ -13,13 +12,8 @@ from lib import common, onepassword
 # The latest backup is also attached to this 1Password item
 BACKUP_ITEM = 'issuing-ca'
 
-
-def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
-
+# Directories with keys and certificates
+BACKUP_DIRS = ['rootca/certs', 'rootca/private', 'issuingca/certs', 'issuingca/private']
 
 # CA database files: serial numbers and issued-certificate index (needed to keep signing)
 DATABASE_FILES = [
@@ -30,35 +24,24 @@ DATABASE_FILES = [
 
 
 def backup(zip_path, confirm=True):
-    if confirm and input(f"This will backup all certificates to {zip_path}. Are you sure (y/n)? ") != "y":
-        print("Aborting")
-        sys.exit(0)
+    if confirm:
+        common.confirm(f'This will backup all certificates to {zip_path}. Are you sure?')
 
-    # Make the list of files to be archived
-    files_to_backup = set()
-    # Add Root CA
-    files_to_backup.update(walk_directory("rootca/certs/", variables.projectroot))
-    files_to_backup.update(walk_directory("rootca/private/", variables.projectroot))
-    # Add Issuing CA and certificates
-    files_to_backup.update(walk_directory("issuingca/certs/", variables.projectroot))
-    files_to_backup.update(walk_directory("issuingca/private/", variables.projectroot))
-    # Add CA database files that exist (rootca has no index.txt.attr until it signs again)
+    files_to_backup = {path for d in BACKUP_DIRS for path in walk_directory(d)}
+    # CA database files that exist (rootca has no index.txt.attr until it signs again)
     files_to_backup.update(f for f in DATABASE_FILES if os.path.exists(f))
-    # Add personal config file (gitignored, not recoverable from source control)
-    files_to_backup.add("lib/defaults.yaml")
+    # Personal config file (gitignored, not recoverable from source control)
+    if os.path.exists('lib/defaults.yaml'):
+        files_to_backup.add('lib/defaults.yaml')
+    else:
+        print('Warning: lib/defaults.yaml not found — skipping.')
 
     # Keep the previous backup, in case this one turns out to be bad
     if os.path.exists(zip_path):
-        previous = f'{zip_path}.previous'
-        if os.path.exists(previous):
-            os.remove(previous)
-        os.rename(zip_path, previous)
+        os.replace(zip_path, f'{zip_path}.previous')
     with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_BZIP2) as myzip:
         for entry in sorted(files_to_backup):
-            if os.path.exists(entry):
-                myzip.write(entry)
-            else:
-                print(f'Warning: {entry} not found — skipping.')
+            myzip.write(entry)
         archived = myzip.namelist()
 
     # Protect the zip file
@@ -75,8 +58,7 @@ def backup(zip_path, confirm=True):
 
 def restore(zip_path):
     if not os.path.exists(zip_path):
-        print(f"Error: {zip_path} not found.")
-        sys.exit(1)
+        raise common.HomeCAError(f'{zip_path} not found.')
 
     with zipfile.ZipFile(zip_path, 'r') as myzip:
         contents = myzip.namelist()
@@ -86,9 +68,7 @@ def restore(zip_path):
     common.print_list(contents)
     print()
     print("WARNING: Existing files will be overwritten.")
-    if input("Are you sure (y/n)? ") != "y":
-        print("Aborting")
-        sys.exit(0)
+    common.confirm('Are you sure?')
 
     with zipfile.ZipFile(zip_path, 'r') as myzip:
         myzip.extractall('.')
@@ -116,17 +96,11 @@ def restore_from_1password(zip_name, vault=None):
         restore(zip_path)
 
 
-def walk_directory(enum_dir, project_root):
-    file_set = set()
-    for dir_, _, files in os.walk(enum_dir):
-        for file_name in files:
-            # Skip unencrypted deployment keys, unfinished certificates and dotfiles
-            if not (file_name.startswith('.') or 'key.open.pem' in file_name
-                    or file_name.endswith('.new')):
-                rel_dir = os.path.relpath(dir_, project_root)
-                rel_file = os.path.join(rel_dir, file_name)
-                file_set.add(rel_file)
-    return file_set
+def walk_directory(enum_dir):
+    """Files below enum_dir, without unencrypted keys, unfinished certificates and dotfiles."""
+    return {os.path.join(dir_, name)
+            for dir_, _, files in os.walk(enum_dir) for name in files
+            if not (name.startswith('.') or 'key.open.pem' in name or name.endswith('.new'))}
 
 
 def main():
@@ -170,31 +144,23 @@ def main():
     if args.vault and not args.from_1password:
         parser.error('--vault only works with --from-1password')
 
-    if args.restore:
-        # Restore must work even when defaults.yaml is absent (it may be what
-        # we are restoring). Only _PROJECT_ROOT is needed; it is computed from
-        # __file__ and requires no config file.
-        from lib.variables import _PROJECT_ROOT, _LIB_DIR
-        os.chdir(_PROJECT_ROOT)
-        if args.file:
-            zip_path = args.file
-        elif os.path.exists(os.path.join(_LIB_DIR, 'defaults.yaml')):
-            # defaults.yaml is present — read the configured backup filename.
-            setup()
-            zip_path = variables.zipfilename
-        else:
-            print('Error: no ZIP filename given and lib/defaults.yaml is missing.')
-            print('Specify the ZIP file explicitly: uv run backup.py --restore FILE')
-            sys.exit(1)
-        if args.from_1password:
-            restore_from_1password(os.path.basename(zip_path), args.vault)
-        else:
-            restore(zip_path)
+    # Restore must work without lib/defaults.yaml (it may be what is restored), so the
+    # configured filename is only used when no FILE is given.
+    if args.file:
+        zip_path = args.file
+    elif os.path.exists(common.DEFAULTS_PATH):
+        zip_path = common.config().zipfilename
     else:
-        setup()
-        zip_path = args.file or variables.zipfilename
+        raise common.HomeCAError('no ZIP filename given and lib/defaults.yaml is missing.\n'
+                                 'Specify the ZIP file explicitly: uv run backup.py --restore FILE')
+
+    if not args.restore:
         backup(zip_path)
+    elif args.from_1password:
+        restore_from_1password(os.path.basename(zip_path), args.vault)
+    else:
+        restore(zip_path)
 
 
 if __name__ == '__main__':
-    main()
+    common.run(main)

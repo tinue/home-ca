@@ -6,7 +6,6 @@ domains:
   - other.example.com
 domainalias: com.example # Reverse version of the domain, used to name certain elements
 dockerhost: docker # The machine in my homelab that provides Intel based docker services
-dockerpihost: dockerpi # The Raspberry Pi in my homelab that provides ARM based docker services
 dockerdir: /users/example/Docker/my_project
 zipfilename: certbackup.zip
 # 1Password vault with one Password item per private key: root-ca, issuing-ca, <cert name>

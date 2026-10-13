@@ -4,40 +4,24 @@
 # the custom certificates of Settings > Control Plane > Console (UniFi OS 4.1 and newer).
 # These are the calls the web UI makes; Ubiquiti does not document them.
 #
-# TLS: the console is trusted only if its certificate chains to our own Root CA. The expiry
-# date is not checked, because it usually still serves the expired certificate being replaced.
+# TLS: see lib/https.py.
 
-import http.client
 import json
-import ssl
 from http.cookies import SimpleCookie
 
-from . import openssl
+from .common import HomeCAError
+from .https import PinnedHTTPS
 
 
-class UniFiError(Exception):
+class UniFiError(HomeCAError):
     pass
 
 
 class UniFiOS:
     def __init__(self, host, port=443):
-        self.host = host
-        self.port = port
+        self._https = PinnedHTTPS(host, port)
         self._cookie = None
         self._csrf = None
-        self._trusted = set()          # DER bytes of server certs already verified
-        self._context = ssl.create_default_context()
-        self._context.check_hostname = False
-        self._context.verify_mode = ssl.CERT_NONE   # verified by _check_peer instead
-
-    def _check_peer(self, der):
-        if der in self._trusted:
-            return
-        try:
-            openssl.verify_server_cert(der, self.host)
-        except RuntimeError as e:
-            raise UniFiError(f'{self.host} does not present a certificate from our CA:\n{e}')
-        self._trusted.add(der)
 
     def _request(self, method, path, body=None):
         """Send a JSON request to /api/<path>; returns the decoded response body (or None)."""
@@ -49,16 +33,8 @@ class UniFiOS:
         if self._csrf:
             headers['X-CSRF-Token'] = self._csrf
 
-        conn = http.client.HTTPSConnection(self.host, self.port, context=self._context, timeout=60)
-        try:
-            conn.connect()
-            self._check_peer(conn.sock.getpeercert(binary_form=True))
-            conn.request(method, f'/api/{path}', body=None if body is None else json.dumps(body),
-                         headers=headers)
-            response = conn.getresponse()
-            text = response.read().decode()
-        finally:
-            conn.close()
+        response, text = self._https.request(method, f'/api/{path}',
+                                             None if body is None else json.dumps(body), headers)
 
         for header in response.headers.get_all('Set-Cookie') or []:
             token = SimpleCookie(header).get('TOKEN')
@@ -69,7 +45,7 @@ class UniFiOS:
 
         if response.status >= 300:
             raise UniFiError(f'{method} /api/{path} failed (HTTP {response.status}): {text[:300]}',
-                             response.status)
+                             code=response.status)
         if not text:
             return None
         try:
@@ -86,10 +62,9 @@ class UniFiOS:
         try:
             self._request('POST', 'auth/login', body)
         except UniFiError as e:
-            status = e.args[1] if len(e.args) > 1 else None
-            if status == 499:
+            if e.code == 499:
                 raise UniFiError('Login failed: the account requires a one-time password')
-            raise UniFiError(f'Login failed: {e.args[0]}')
+            raise UniFiError(f'Login failed: {e}')
         if not self._cookie:
             raise UniFiError('Login failed: no session cookie in the response')
 

@@ -14,15 +14,9 @@ import argparse
 import os
 import sys
 
-from lib import expiry, onepassword, openssl
-
-
-def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
-    os.environ["PROJECTROOT"] = variables.projectroot
+import backup
+from lib import common, expiry, onepassword, openssl
+from lib.common import ISSUING_CERT, ISSUING_KEY, HomeCAError, config
 
 
 def parse_name(name):
@@ -30,16 +24,17 @@ def parse_name(name):
     name = name.lower().rstrip('.')
     wildcard = name.startswith('*.')
     name = name.removeprefix('*.')
-    if name in variables.domains:
+    domains = config().domains
+    if name in domains:
         return name, name, None
     if not wildcard:
-        for domain in sorted(variables.domains, key=len, reverse=True):
+        for domain in sorted(domains, key=len, reverse=True):
             if name.endswith(f'.{domain}'):
                 host = name.removesuffix(f'.{domain}')
                 return name, domain, host
     sys.exit(
         f'{name} is not a configured domain or a host in one.\n'
-        f'Configured domains: {", ".join(variables.domains)}'
+        f'Configured domains: {", ".join(domains)}'
     )
 
 
@@ -52,7 +47,7 @@ def sans_from_args(cert_name, domain, host, args):
     else:
         sans = [f'DNS:{cert_name}']
         if args.multi_domain:
-            sans += [f'DNS:{d}' for d in variables.domains if d != domain]
+            sans += [f'DNS:{d}' for d in config().domains if d != domain]
     return sans + [f'DNS:{san}' for san in args.extra_sans]
 
 
@@ -89,8 +84,6 @@ def key_password_for_new_cert(cert_name, key_path):
 
 
 def main():
-    setup()
-
     parser = argparse.ArgumentParser(
         description='Create or renew a TLS certificate.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -115,8 +108,8 @@ def main():
     args = parser.parse_args()
 
     cert_name, domain, host = parse_name(args.name)
-    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
-    key_path = f'issuingca/private/{cert_name}.key.pem'
+    cert_path = common.cert_path(cert_name)
+    key_path = common.key_path(cert_name)
     new_path = f'{cert_path}.new'
     is_renewal = os.path.exists(cert_path)
     san_args_given = bool(args.extra_sans or args.multi_domain)
@@ -144,8 +137,8 @@ def main():
 
     # 2. Passwords from 1Password, checked before anything is changed
     issuing_password = onepassword.read_password('issuing-ca')
-    if not openssl.key_password_ok('issuingca/private/issuing.key.pem', issuing_password):
-        sys.exit('The 1Password item "issuing-ca" does not open issuingca/private/issuing.key.pem.')
+    if not openssl.key_password_ok(ISSUING_KEY, issuing_password):
+        sys.exit(f'The 1Password item "issuing-ca" does not open {ISSUING_KEY}.')
     if is_renewal:
         key_password = onepassword.read_password(cert_name)
         if not openssl.key_password_ok(key_path, key_password):
@@ -155,43 +148,38 @@ def main():
 
     # 3. CSR (new key only if none exists yet) and signature into a temporary file
     san_string = ','.join(sans)
+    new_key = not os.path.exists(key_path)
     try:
-        if os.path.exists(key_path):
-            openssl.signing_request_renew(cert_name, cn, san_string, key_password)
-        else:
+        if new_key:
             print('Generating private key (RSA 4096) ...')
-            openssl.signing_request(cert_name, cn, san_string, key_password)
+        openssl.signing_request(cert_name, cn, san_string, key_password, new_key)
+        if new_key:
             os.chmod(key_path, 0o400)
-        openssl.sign_certificate(cert_name, issuing_password, out_path=new_path)
+        openssl.sign_certificate(cert_name, issuing_password, new_path)
         # Append issuing CA chain so clients only need to import the Root CA
-        with open(new_path, 'a') as cert_file, open('issuingca/certs/issuing.cert.pem') as issuing_file:
+        with open(new_path, 'a') as cert_file, open(ISSUING_CERT) as issuing_file:
             cert_file.write(issuing_file.read())
-        print(openssl.verify_certificate(cert_name, new_path).strip())
-    except RuntimeError as e:
+        print(openssl.verify_certificate(new_path).strip())
+    except HomeCAError as e:
         if os.path.exists(new_path):
             os.remove(new_path)
         sys.exit(f'Error: {e}\nNothing was replaced.')
 
     # 4. Swap in the new certificate; the previous one is kept as .backup
     if is_renewal:
-        backup_path = f'{cert_path}.backup'
-        if os.path.exists(backup_path):
-            os.remove(backup_path)
-        os.rename(cert_path, backup_path)
-    os.rename(new_path, cert_path)
+        os.replace(cert_path, f'{cert_path}.backup')
+    os.replace(new_path, cert_path)
     os.chmod(cert_path, 0o444)
 
-    _, end = expiry.status(cert_path)
+    end = expiry.enddate(cert_path)
     print()
     print(f'{"Renewed" if is_renewal else "Created"} {cert_path}, valid until {end:%Y-%m-%d %H:%M} UTC')
     print('Install it with: uv run installcerts.py all (or name the targets)')
 
     # 5. Backup
     print()
-    import backup
-    backup.setup()
-    backup.backup(variables.zipfilename, confirm=False)
+    backup.backup(config().zipfilename, confirm=False)
 
 
 if __name__ == '__main__':
-    main()
+    common.run(main)
