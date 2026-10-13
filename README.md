@@ -151,7 +151,7 @@ uv run gencert.py myserver.home.example.com -m          # + all other configured
 | `uv run cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `uv run initca.py` afterwards |
 | `uv run cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `uv run initca.py` to recreate it from the example file |
 | `uv run decryptkey.py [-d DOMAIN] [-H HOST]` | Prints a certificate's decrypted private key (password from 1Password) to stdout, for manual imports, e.g. `uv run decryptkey.py -H nas \| pbcopy`. No file is written |
-| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology`, `proxmox`, `unifi` (default: all). **Highly specific to your infrastructure**, use as a template |
+| `uv run installcerts.py TARGET...` | Deploys certificates; targets `docker`, `java`, `synology`, `proxmox`, `unifi`, or `all`. An error in one target is reported and the others still run; a summary lists each target's result. **Highly specific to your infrastructure**, use as a template |
 | `uv run installcerts.py --list-synology` | Lists the certificates installed in Synology DSM and the services using them |
 
 ### Synology DSM

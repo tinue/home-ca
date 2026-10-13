@@ -250,32 +250,67 @@ TARGETS = {
 }
 
 
+def _run_target(target):
+    """Run one target; return None on success, or the error message."""
+    try:
+        TARGETS[target]()
+    except subprocess.CalledProcessError as e:
+        return f'command failed with exit code {e.returncode}: {" ".join(str(a) for a in e.cmd)}'
+    except (synology.DSMError, unifi.UniFiError) as e:
+        return e.args[0]
+    except RuntimeError as e:   # OpenSSL
+        return str(e)
+    except SystemExit as e:     # the targets exit with a message on expected problems
+        return None if e.code in (None, 0) else str(e.code)
+    except Exception as e:      # anything unexpected, e.g. a missing config key or network error
+        return f'{type(e).__name__}: {e}'
+    return None
+
+
 def main():
     setup()
     sys.stdout.reconfigure(line_buffering=True)   # keep our output in order with the commands'
-    parser = argparse.ArgumentParser(description='Install certificates to their target systems.')
+    parser = argparse.ArgumentParser(
+        description='Install certificates to their target systems.',
+        epilog='With several targets (or all), an error in one target is reported '
+               'and the remaining targets still run.')
     parser.add_argument('targets', nargs='*', metavar='TARGET',
-                        help=f'what to install: {", ".join(TARGETS)} (default: all)')
+                        help=f'what to install: {", ".join(TARGETS)}, or all')
     parser.add_argument('--list-synology', action='store_true',
                         help='only list the certificates installed in DSM')
     args = parser.parse_args()
-    unknown = set(args.targets) - set(TARGETS)
+
+    if args.list_synology:
+        error = None
+        try:
+            list_synology_certs()
+        except synology.DSMError as e:
+            error = e.args[0]
+        if error:
+            sys.exit(f'Error: {error}')
+        return
+
+    if not args.targets:
+        parser.error(f'name the targets to install: {", ".join(TARGETS)}, or all')
+    targets = list(TARGETS) if 'all' in args.targets else list(dict.fromkeys(args.targets))
+    unknown = set(targets) - set(TARGETS)
     if unknown:
         parser.error(f'unknown target(s): {", ".join(sorted(unknown))}')
 
-    try:
-        if args.list_synology:
-            list_synology_certs()
-            return
-        for i, target in enumerate(args.targets or TARGETS):
-            if i:
-                print()
-            TARGETS[target]()
-    except subprocess.CalledProcessError as e:
-        print(f'Error: command failed with exit code {e.returncode}')
-        sys.exit(1)
-    except (synology.DSMError, unifi.UniFiError) as e:
-        print(f'Error: {e.args[0]}')
+    failed = {}
+    for i, target in enumerate(targets):
+        if i:
+            print()
+        error = _run_target(target)
+        if error:
+            failed[target] = error
+            print(f'Error in {target}: {error}', file=sys.stderr)
+
+    if len(targets) > 1:
+        print()
+        for target in targets:
+            print(f'  {target:10} {"FAILED" if target in failed else "ok"}')
+    if failed:
         sys.exit(1)
 
 
