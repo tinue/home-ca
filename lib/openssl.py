@@ -11,10 +11,12 @@ import tempfile
 from .common import (HomeCAError, ISSUING_CERT, ISSUING_KEY, PROJECT_ROOT, ROOT_CERT, config,
                      csr_path, key_path)
 
-# Passwords are handed to OpenSSL through the environment (env:VAR),
-# never on the command line where other processes could see them.
-PASSIN = 'HOMECA_PASSIN'
-PASSOUT = 'HOMECA_PASSOUT'
+# Passwords are handed to OpenSSL through a pipe (fd:N), never on the command line or in
+# the environment. Callers put these placeholders where OpenSSL expects a password source,
+# e.g. '-passin', PASSIN; runssl replaces them with the pipe.
+# (env:VAR failed intermittently with OpenSSL 4.0 on macOS, while a pipe kept working.)
+PASSIN = '<passin>'
+PASSOUT = '<passout>'
 
 
 def _environment():
@@ -30,12 +32,22 @@ def _environment():
 
 def runssl(*args, passin=None, passout=None):
     command = [config().opensslpath, *args]
-    env = {**os.environ, **_environment()}
-    if passin is not None:
-        env[PASSIN] = passin
-    if passout is not None:
-        env[PASSOUT] = passout
-    result = subprocess.run(command, capture_output=True, text=True, env=env)
+    pipes = []
+    try:
+        for placeholder, password in ((PASSIN, passin), (PASSOUT, passout)):
+            if placeholder in command:
+                if password is None:
+                    raise HomeCAError(f'OpenSSL needs a password for {placeholder}, none given.')
+                read_end, write_end = os.pipe()
+                pipes.append(read_end)
+                with os.fdopen(write_end, 'w') as f:   # a password fits the pipe buffer
+                    f.write(password + '\n')
+                command[command.index(placeholder)] = f'fd:{read_end}'
+        result = subprocess.run(command, capture_output=True, text=True,
+                                env={**os.environ, **_environment()}, pass_fds=pipes)
+    finally:
+        for fd in pipes:
+            os.close(fd)
     if result.returncode != 0:
         raise HomeCAError(
             f"OpenSSL failed (rc={result.returncode}):\n"
@@ -65,7 +77,7 @@ def leaf_pem(cert_path):
 def key_password_ok(path, password):
     """True if password decrypts the private key at path."""
     try:
-        runssl('pkey', '-in', path, '-passin', f'env:{PASSIN}', '-noout', passin=password)
+        runssl('pkey', '-in', path, '-passin', PASSIN, '-noout', passin=password)
         return True
     except HomeCAError:
         return False
@@ -74,9 +86,9 @@ def key_password_ok(path, password):
 def signing_request(cert_name, cn, san_string, key_password, new_key):
     """Write the CSR of cert_name, with its existing key or (new_key) a new RSA 4096 key."""
     if new_key:
-        key_args = ['-newkey', 'rsa:4096', '-keyout', key_path(cert_name), '-passout', f'env:{PASSOUT}']
+        key_args = ['-newkey', 'rsa:4096', '-keyout', key_path(cert_name), '-passout', PASSOUT]
     else:
-        key_args = ['-key', key_path(cert_name), '-passin', f'env:{PASSIN}']
+        key_args = ['-key', key_path(cert_name), '-passin', PASSIN]
     return runssl(
         'req', *key_args,
         '-subj', f'/CN={cn}',
@@ -109,7 +121,7 @@ def sign_certificate(cert_name, issuing_password, out_path):
             '-CA', ISSUING_CERT,
             '-CAkey', ISSUING_KEY,
             '-CAserial', 'issuingca/serial',
-            '-passin', f'env:{PASSIN}',
+            '-passin', PASSIN,
             '-copy_extensions', 'copy',
             '-days', '200', '-sha256',
             '-extfile', ext_file,
@@ -128,13 +140,13 @@ def verify_certificate(cert_path):
 
 def decrypted_key(cert_name, key_password):
     """Return the unencrypted private key as PEM text, without writing a file."""
-    return runssl('rsa', '-in', key_path(cert_name), '-passin', f'env:{PASSIN}', passin=key_password)
+    return runssl('rsa', '-in', key_path(cert_name), '-passin', PASSIN, passin=key_password)
 
 
 def generate_key(path, password, bits=4096):
     return runssl(
         'genpkey', '-aes256',
-        '-pass', f'env:{PASSOUT}',
+        '-pass', PASSOUT,
         '-out', path,
         '-algorithm', 'RSA',
         '-pkeyopt', f'rsa_keygen_bits:{bits}',
@@ -148,7 +160,7 @@ def self_sign(key, config_path, password, cert_path, days=7300):
         'req', '-new', '-x509',
         '-config', config_path,
         '-key', key,
-        '-passin', f'env:{PASSIN}',
+        '-passin', PASSIN,
         '-days', str(days),
         '-sha256', '-extensions', 'v3_ca',
         '-out', cert_path,
@@ -162,7 +174,7 @@ def ca_csr(key, config_path, password, csr):
         'req', '-new', '-sha256',
         '-config', config_path,
         '-key', key,
-        '-passin', f'env:{PASSIN}',
+        '-passin', PASSIN,
         '-out', csr,
         passin=password,
     )
@@ -176,7 +188,7 @@ def sign_intermediate_ca(csr, config_path, password, cert_path, days=3650):
         '-extensions', 'v3_intermediate_ca',
         '-days', str(days),
         '-notext', '-md', 'sha256',
-        '-passin', f'env:{PASSIN}',
+        '-passin', PASSIN,
         '-in', csr,
         '-out', cert_path,
         passin=password,
