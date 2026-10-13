@@ -63,7 +63,7 @@ Copy `lib/defaults_example.yaml` to `lib/defaults.yaml` and edit it to match you
 (or simply run `uv run initca.py`, which does this automatically).
 
 Besides paths and certificate properties, it sets the 1Password vault (`onepassword.vault`) and,
-optionally, the Synology DSM and Proxmox VE deployments (`synology`, `proxmox`, see `installcerts.py`).
+optionally, the Synology DSM, Proxmox VE and UniFi OS deployments (`synology`, `proxmox`, `unifi`, see `installcerts.py`).
 
 # One-time setup
 
@@ -150,7 +150,7 @@ uv run gencert.py myserver.home.example.com -m          # + all other configured
 | `uv run cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `uv run initca.py` afterwards |
 | `uv run cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `uv run initca.py` to recreate it from the example file |
 | `uv run decryptkey.py [-d DOMAIN] [-H HOST]` | Prints a certificate's decrypted private key (password from 1Password) to stdout, for manual imports, e.g. `uv run decryptkey.py -H nas \| pbcopy`. No file is written |
-| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology`, `proxmox` (default: all). **Highly specific to your infrastructure**, use as a template |
+| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology`, `proxmox`, `unifi` (default: all). **Highly specific to your infrastructure**, use as a template |
 | `uv run installcerts.py --list-synology` | Lists the certificates installed in Synology DSM and the services using them |
 
 ### Synology DSM
@@ -172,6 +172,18 @@ private temporary directory, installed with `pvenode cert set … --force 1 --re
 supported way, which writes `/etc/pve/nodes/<node>/pveproxy-ssl.{pem,key}`), and then deleted.
 Afterwards the script checks that the node's FQDN serves the new certificate, trusted via our Root CA.
 The cluster-internal `pve-ssl.*` certificates are not touched.
+
+### UniFi OS
+
+`installcerts.py unifi` installs the certificate in `unifi.certificate` as the console certificate
+of a UniFi OS console (UniFi OS 4.1 or newer, e.g. a UCG, UDM or Cloud Key) through the API the web
+UI uses (Settings > Control Plane > Console > Certificates; undocumented by Ubiquiti, checked on
+UniFi OS 5.1). It uploads the certificate with its chain, activates it, and deletes the previously
+active certificate if it was an uploaded one with the same CN. A certificate that is already
+uploaded is only activated. The login comes from the 1Password item in `unifi.login`: a **local**
+console account (username, password, and the one-time password if 2FA is enabled); UI.com SSO
+accounts cannot log in locally. The console is only trusted if its current certificate chains to
+our Root CA, and afterwards the script checks that it serves the new certificate.
 
 # References
 

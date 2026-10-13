@@ -198,6 +198,21 @@ def verify_chain(ca_cert_path, cert_path):
     )
 
 
+def verify_server_cert(der, host):
+    """Verify a server certificate (DER) against our Root CA and host name, ignoring expiry,
+    since a server usually still serves the expired certificate being replaced.
+    Raises RuntimeError if it does not verify."""
+    import os, ssl, tempfile
+    fd, path = tempfile.mkstemp(suffix='.pem')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(ssl.DER_cert_to_PEM_cert(der))
+        runssl('verify', '-no_check_time', '-CAfile', 'rootca/certs/ca.cert.pem',
+               '-untrusted', 'issuingca/certs/issuing.cert.pem', '-verify_hostname', host, path)
+    finally:
+        os.unlink(path)
+
+
 def subject_cn(cert_path):
     """Return the CN from the certificate subject, or an empty string."""
     import re

@@ -46,6 +46,9 @@ class Variables:
         # Proxmox VE certificate deployment (optional)
         self.proxmox = defaults.get('proxmox') or {}
 
+        # UniFi OS console certificate deployment (optional)
+        self.unifi = defaults.get('unifi') or {}
+
         # Properties of the certificates
         cert_properties = {}
         for entry in defaults.get('certproperties'):

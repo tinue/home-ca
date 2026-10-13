@@ -26,6 +26,11 @@ proxmox:
   nodes:                                   # ssh destinations of the nodes (passwordless, as root;
     - pve1                                 # user and hostname may come from ~/.ssh/config)
     - pve2
+# UniFi OS console deployment (optional, used by installcerts.py unifi)
+unifi:
+  host: unifi.example.com                  # Console hostname
+  certificate: example.com                 # Certificate (name as issued) to serve on the console
+  login: op://Private/UniFi local admin    # 1Password item with username, password and optional OTP
 # Properties of the certificates
 certproperties:
 - country: CH

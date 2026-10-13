@@ -7,6 +7,7 @@
 
 import argparse
 import getpass
+import hashlib
 import os
 import socket
 import ssl
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from lib import onepassword, openssl, synology
+from lib import expiry, onepassword, openssl, synology, unifi
 
 
 def setup():
@@ -196,11 +197,56 @@ def _verify_served(host, port, cert_path, timeout=15):
     print(f'  {host}:{port} serves it, valid until {openssl.enddate(cert_path)}')
 
 
+def install_unifi_cert():
+    """Upload the configured certificate to the UniFi OS console, activate it, drop the old one."""
+    config = variables.unifi
+    if not config:
+        sys.exit('No unifi section in lib/defaults.yaml.')
+    host, cert_name, login = config['host'], config['certificate'], config['login']
+    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
+    with open(cert_path) as f:
+        chain_pem = f.read()   # leaf + issuing CA, as the console expects
+    leaf_der = ssl.PEM_cert_to_DER_cert(_leaf_pem(cert_path))
+    fingerprints = {hashlib.sha256(leaf_der).hexdigest(), hashlib.sha1(leaf_der).hexdigest()}
+    cn = openssl.subject_cn(cert_path)
+
+    print(f'Installing {cert_name} to UniFi OS on {host} ...')
+    console = unifi.UniFiOS(host, config.get('port', 443))
+    console.login(onepassword.read_field(f'{login}/username'),
+                  onepassword.read_field(f'{login}/password'), onepassword.read_otp(login))
+    try:
+        installed = console.certificates()
+        previous = [c for c in installed if c.get('active')]
+        same = [c for c in installed
+                if ''.join(ch for ch in (c.get('fingerprint') or '').lower() if ch in '0123456789abcdef')
+                in fingerprints]
+        if same:
+            new = same[0]
+            print(f'  already uploaded as "{new["name"]}"')
+        else:
+            name = f'{cn} until {expiry.status(cert_path)[1]:%Y-%m-%d}'
+            new = console.upload_certificate(name, chain_pem, _key_pem(cert_name))
+            print(f'  uploaded as "{name}"')
+        if not new.get('active'):
+            console.activate_certificate(new['id'])
+            print('  activated')
+        # Remove the certificate it replaces, if it was one of ours for the same name
+        for old in previous:
+            if old['id'] != new['id'] and old.get('source', 'uploaded') == 'uploaded' \
+                    and cn in str(old.get('subject', '')):
+                console.delete_certificate(old['id'])
+                print(f'  deleted the previous certificate "{old["name"]}"')
+    finally:
+        console.logout()
+    _verify_served(host, config.get('port', 443), cert_path)
+
+
 TARGETS = {
     'docker': install_docker_certs,
     'java': install_java_ca,
     'synology': install_synology_certs,
     'proxmox': install_proxmox_certs,
+    'unifi': install_unifi_cert,
 }
 
 
@@ -228,7 +274,7 @@ def main():
     except subprocess.CalledProcessError as e:
         print(f'Error: command failed with exit code {e.returncode}')
         sys.exit(1)
-    except synology.DSMError as e:
+    except (synology.DSMError, unifi.UniFiError) as e:
         print(f'Error: {e.args[0]}')
         sys.exit(1)
 

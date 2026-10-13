@@ -8,16 +8,11 @@
 
 import http.client
 import json
-import os
 import ssl
-import tempfile
 import urllib.parse
 import uuid
 
 from . import openssl
-
-ROOT_CA = 'rootca/certs/ca.cert.pem'
-ISSUING_CA = 'issuingca/certs/issuing.cert.pem'
 
 # DSM error codes for SYNO.API.Auth login
 _AUTH_ERRORS = {
@@ -52,16 +47,10 @@ class DSM:
         """Verify the server certificate against our Root CA (hostname yes, expiry no)."""
         if der in self._trusted:
             return
-        fd, path = tempfile.mkstemp(suffix='.pem')
         try:
-            with os.fdopen(fd, 'w') as f:
-                f.write(ssl.DER_cert_to_PEM_cert(der))
-            openssl.runssl('verify', '-no_check_time', '-CAfile', ROOT_CA,
-                           '-untrusted', ISSUING_CA, '-verify_hostname', self.host, path)
+            openssl.verify_server_cert(der, self.host)
         except RuntimeError as e:
             raise DSMError(f'{self.host} does not present a certificate from our CA:\n{e}')
-        finally:
-            os.unlink(path)
         self._trusted.add(der)
 
     def _call(self, cgi, params, body=None, content_type=None):
