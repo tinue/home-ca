@@ -184,7 +184,7 @@ def main():
     _, end = expiry.status(cert_path)
     print()
     print(f'{"Renewed" if is_renewal else "Created"} {cert_path}, valid until {end:%Y-%m-%d %H:%M} UTC')
-    print('Install it with: uv run installcerts.py')
+    print('Install it with: uv run installcerts.py all (or name the targets)')
 
     # 5. Backup
     print()
