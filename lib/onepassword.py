@@ -5,6 +5,7 @@
 # root-ca, issuing-ca, and <cert_name> for issued certificates.
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -29,7 +30,8 @@ def _op(*args):
     """Run op and return stdout; exit with a readable message on failure."""
     if shutil.which('op') is None:
         sys.exit('1Password CLI (op) not found. Install it: brew install 1password-cli')
-    result = subprocess.run(['op', *args], capture_output=True, text=True)
+    # No stdin: op item create/edit would read piped input as a JSON item template
+    result = subprocess.run(['op', *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if result.returncode != 0:
         sys.exit(
             f'1Password CLI failed: op {" ".join(args[:2])}\n'
@@ -89,3 +91,22 @@ def read_otp(item_reference):
     result = subprocess.run(['op', 'item', 'get', item, '--vault', vault, '--otp'],
                             capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def attach_file(title, path):
+    """Attach the file at path to item <title>, replacing an attachment of the same name."""
+    if not item_exists(title):
+        sys.exit(f'No item "{title}" in 1Password vault "{_vault()}".')
+    name = os.path.basename(path).replace('.', r'\.')   # '.' would start a section name
+    _op('item', 'edit', title, '--vault', _vault(), f'{name}[file]={os.path.abspath(path)}')
+
+
+def read_file(title, name, out_path, vault=None):
+    """Save the attachment <name> of item <title> to out_path. vault defaults to the
+    configured one; pass it when lib/defaults.yaml is not available (restore)."""
+    vault = vault or _vault()
+    item = json.loads(_op('item', 'get', title, '--vault', vault, '--format', 'json'))
+    ids = [f['id'] for f in item.get('files', []) if f.get('name') == name]
+    if not ids:
+        sys.exit(f'Item "{title}" in vault "{vault}" has no attachment "{name}".')
+    _op('read', '--force', '--out-file', out_path, f'op://{vault}/{item["id"]}/{ids[0]}')

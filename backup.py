@@ -5,9 +5,13 @@
 import argparse
 import os
 import sys
+import tempfile
 import zipfile
 
-from lib import common
+from lib import common, onepassword
+
+# The latest backup is also attached to this 1Password item
+BACKUP_ITEM = 'issuing-ca'
 
 
 def setup():
@@ -64,6 +68,10 @@ def backup(zip_path, confirm=True):
     print(f'Backup written to {zip_path}:')
     common.print_list(archived)
 
+    # Off-site copy: replaces the previous attachment of the same name
+    onepassword.attach_file(BACKUP_ITEM, zip_path)
+    print(f'Attached to 1Password item "{BACKUP_ITEM}" as {os.path.basename(zip_path)}.')
+
 
 def restore(zip_path):
     if not os.path.exists(zip_path):
@@ -100,6 +108,14 @@ def restore(zip_path):
     print(f"Restored {len(contents)} file(s).")
 
 
+def restore_from_1password(zip_name, vault=None):
+    """Download the backup attached to the 1Password item and restore from it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = os.path.join(tmp, zip_name)
+        onepassword.read_file(BACKUP_ITEM, zip_name, zip_path, vault)
+        restore(zip_path)
+
+
 def walk_directory(enum_dir, project_root):
     file_set = set()
     for dir_, _, files in os.walk(enum_dir):
@@ -119,7 +135,11 @@ def main():
         epilog=(
             'Without --restore (default): creates a compressed ZIP of all keys\n'
             '  and certificates, excluding unencrypted deployment keys.\n\n'
-            'With --restore: extracts a ZIP backup and restores file permissions.'
+            'With --restore: extracts a ZIP backup and restores file permissions.\n'
+            'With --restore --from-1password: restores the backup attached to the\n'
+            f'  1Password item "{BACKUP_ITEM}" (FILE names the attachment). Without\n'
+            '  lib/defaults.yaml (e.g. on a new machine), also give FILE and --vault:\n'
+            '  uv run backup.py --restore --from-1password --vault "Home CA" certbackup.zip'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -135,7 +155,20 @@ def main():
         action='store_true',
         help='Restore from a ZIP backup instead of creating one',
     )
+    parser.add_argument(
+        '--from-1password',
+        action='store_true',
+        help=f'With --restore: use the backup attached to the 1Password item "{BACKUP_ITEM}"',
+    )
+    parser.add_argument(
+        '--vault',
+        help='With --from-1password: vault of the item (default: onepassword.vault from lib/defaults.yaml)',
+    )
     args = parser.parse_args()
+    if args.from_1password and not args.restore:
+        parser.error('--from-1password only works with --restore')
+    if args.vault and not args.from_1password:
+        parser.error('--vault only works with --from-1password')
 
     if args.restore:
         # Restore must work even when defaults.yaml is absent (it may be what
@@ -153,7 +186,10 @@ def main():
             print('Error: no ZIP filename given and lib/defaults.yaml is missing.')
             print('Specify the ZIP file explicitly: uv run backup.py --restore FILE')
             sys.exit(1)
-        restore(zip_path)
+        if args.from_1password:
+            restore_from_1password(os.path.basename(zip_path), args.vault)
+        else:
+            restore(zip_path)
     else:
         setup()
         zip_path = args.file or variables.zipfilename

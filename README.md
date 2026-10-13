@@ -144,8 +144,9 @@ uv run gencert.py myserver.home.example.com -m          # + all other configured
 |---|---|
 | `uv run showexpiries.py` | Lists expiry dates of all issued certificates |
 | `uv run dumpcertificate.py [-d DOMAIN] [-H HOST]` | Dumps key fields of an issued certificate: CN, SANs, expiry, key usage, extended key usage |
-| `uv run backup.py [FILE]` | Creates a compressed ZIP of all keys, certificates and CA database files (`serial`, `index.txt`, …; excludes unencrypted keys); keeps the previous ZIP as `FILE.previous`. FILE defaults to the configured backup filename |
+| `uv run backup.py [FILE]` | Creates a compressed ZIP of all keys, certificates and CA database files (`serial`, `index.txt`, …; excludes unencrypted keys); keeps the previous ZIP as `FILE.previous`, and attaches the ZIP to the 1Password item `issuing-ca` (replacing the previous attachment). FILE defaults to the configured backup filename |
 | `uv run backup.py --restore [FILE]` | Restores from a ZIP backup and resets file permissions; FILE defaults to the configured backup filename |
+| `uv run backup.py --restore --from-1password [--vault VAULT] [FILE]` | Restores from the backup attached to `issuing-ca`. On a new machine without `lib/defaults.yaml`, give the vault and the attachment name: `--vault "Home CA" certbackup.zip` |
 | `uv run cleanup.py` | Removes all issued certificates and keys while keeping the CA intact; useful when changing domain names |
 | `uv run cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `uv run initca.py` afterwards |
 | `uv run cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `uv run initca.py` to recreate it from the example file |
