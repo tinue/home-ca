@@ -1,7 +1,14 @@
-*.iml
+# Mac
 .DS_Store
+.TemporaryItems
+Thumbs.db
+._*
+# IDEs
 /.idea/
-/variables.sh
+*.code-workspace
+*.iml
+# Project specific
+/lib/defaults.yaml
 certs/
 crl/
 csr/
@@ -10,4 +17,8 @@ private/
 serial*
 crlnumber*
 index.txt*
-certbackup.zip
+certbackup.zip*
+*.pyc
+/__pycache__
+/venv/
+/.venv/

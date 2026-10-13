@@ -1,0 +1,32 @@
+---
+opensslpath: /opt/homebrew/bin/openssl # Path to openssl
+domains:
+  - example.com
+  - dmz.example.com
+  - other.example.com
+domainalias: com.example # Reverse version of the domain, used to name certain elements
+dockerhost: docker # The machine in my homelab that provides Intel based docker services
+dockerpihost: dockerpi # The Raspberry Pi in my homelab that provides ARM based docker services
+dockerdir: /users/example/Docker/my_project
+zipfilename: certbackup.zip
+# 1Password vault with one Password item per private key: root-ca, issuing-ca, <cert name>
+onepassword:
+  vault: Home CA
+# Synology DSM certificate deployment (optional, used by installcerts.py synology)
+synology:
+  host: nas.example.com                    # DSM hostname
+  port: 5001                               # DSM HTTPS port
+  certificates:                            # Certificates (names as issued) to replace in DSM,
+    - example.com                          # matched by their CN
+    - nas.example.com
+  login: op://Private/Synology admin       # 1Password item with username, password and optional OTP
+# Properties of the certificates
+certproperties:
+- country: CH
+- state: ZH
+- city: Zurich
+- org: Private
+- orgunit: Private
+- email: sam@muster.ch
+rootcaname: Sample Root CA
+issuingcaname: Sample Issuing CA

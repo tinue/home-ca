@@ -1,79 +1,178 @@
 # Certification Authority for home use
-For some use cases, self created SSL certificates are necessary. If you don't know why you need
-such certificates, then most probably you don't need them. You should go ahead and use
-e.g. Let's Encrypt.
 
-If you know what you are doing, then this collection of scripts and config files helps in
+For some use cases, self-signed SSL certificates are necessary. If you don't know why you need
+such certificates, you most probably don't — consider [Let's Encrypt](https://letsencrypt.org)
+instead.
+
+If you know what you are doing, this collection of scripts and configuration files helps in
 operating a small home-use certification authority.
 
 # Preconditions
-The scripts are built for openssl. They were developed on a Mac, with openssl@1.1 installed via
-homebrew. They should work fine on any Linux system, if you adapt the path to the openssl command
-in the script. The scripts are not tested in Windows, but I suspect they work fine in WSL, e.g.
-with Ubuntu.
+
+**OpenSSL 3.x** is required. On macOS, install via Homebrew (`brew install openssl`) and set
+the path in `lib/defaults.yaml` (see below). The scripts were developed on macOS but should
+work on any Linux system. Not tested on Windows, but should work in WSL.
+
+**Python 3.15** or newer is required for the Python scripts; uv (see below) downloads it
+automatically if it is not installed. The only third-party dependency is
+[PyYAML](https://pypi.org/project/PyYAML/). All other imports (`argparse`, `getpass`, `os`,
+`shutil`, `subprocess`, `zipfile`, …) are part of the Python standard library.
+
+**1Password CLI** (`op`, `brew install 1password-cli`) holds the passwords of all private keys.
+Enable *Integrate with 1Password CLI* in the 1Password app, so `op` unlocks with Touch ID. The
+configured vault contains one *Password* item per key, titled after it:
+
+| Item | Protects |
+|---|---|
+| `root-ca` | `rootca/private/ca.key.pem` |
+| `issuing-ca` | `issuingca/private/issuing.key.pem` |
+| `<cert name>`, e.g. `home.example.com` | `issuingca/private/<cert name>.key.pem` |
+
+`gencert.py` creates the items for new certificates itself. `initca.py` still asks for the
+Root CA and Issuing CA passwords; store them as `root-ca` and `issuing-ca` afterwards.
+
+# Setting up the Python environment
+
+The project is managed with [uv](https://docs.astral.sh/uv/). Dependencies are declared in
+`pyproject.toml` and pinned in `uv.lock`. Install uv once if not already present:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: brew install uv
+```
+
+Then create the virtual environment and install the dependencies:
+
+```sh
+uv sync                                 # installs Python 3.15 and creates .venv/ from uv.lock
+```
+
+Run the scripts with `uv run`, which uses `.venv` automatically (and syncs it if needed):
+
+```sh
+uv run gencert.py
+uv run backup.py
+```
+
+The scripts are executable and use `uv run` as their interpreter, so `./gencert.py` works too.
+Alternatively, activate the environment (`source .venv/bin/activate`) and use `python` directly.
+
+# Configuration
+
+`lib/defaults.yaml` controls all scripts. It is gitignored and must never be committed.
+Copy `lib/defaults_example.yaml` to `lib/defaults.yaml` and edit it to match your environment
+(or simply run `uv run initca.py`, which does this automatically).
+
+Besides paths and certificate properties, it sets the 1Password vault (`onepassword.vault`) and,
+optionally, the Synology DSM deployment (`synology`, see `installcerts.py`).
 
 # One-time setup
 
-## Step one: Customize
-Use `./init.sh`.  
-This should open your default visual editor with the file `variables.sh` opened.
-If this didn't work, open the file yourself with your editor of choice.  
-Go through the entire file and set your desired values. After you are finished, I recommend to run `./cleanup.sh`
-to get rid of any previous residues.  
-Attention: `init` will reset your customized `variables.sh` file. 
-Even worse: `cleanup` will delete all of your certificates! You have to start from scratch
-afterwards.
+```sh
+uv run initca.py
+```
 
-## Step two: Create the certificates for the CA
-Use `./generatecacerts.sh`.  
-The password for the two private keys is asked only once. If you mistype, you won't realize it! 
-I recommend to generate and store the passwords with a password manager, and then copy/paste it.  
-After finishing, the certificates will be there:
-* Root certificate: `rootca/certs/ca.cert.pem`
-* Root private key: `rootca/private/ca.key.pem`
-* Issuing certificate: `issuingca/certs/issuing.cert.pem`
-* Issuing private key: `issuingca/private/issuing.key.pem`
+Run this command once, and again after editing the configuration:
 
-Now would be a good time to run `backup.sh`.
+1. **First run** — if `lib/defaults.yaml` does not yet exist, it is copied from `lib/defaults_example.yaml`
+   and opened in your editor (`$VISUAL` / `$EDITOR` / vi). The script then exits so you can
+   finish editing (necessary for GUI editors that return immediately).
+2. **Second run** — once `lib/defaults.yaml` is in place, the CA directory structure is created
+   and Root CA and Issuing CA keys and certificates are generated.
 
-# Issue server certificates
-Server certificates are created with `generateservercert.sh <host>`. After creation, the files are here:
-* Certificate: `issuingca/certs/`
-* Private key: `issuingca/private/`
+Steps that have already been completed are skipped safely — the script can be re-run without
+overwriting existing keys.
 
-There will be an unencrypted key, because this is usually what you need on a server (e.g. on
-a Synology DSM, or on a VMWare ESXi virtualizer). Make sure to delete the open keys after importing!
-If you need to re-import later, use `decryptkey.sh` to create another open key.
+Passwords for the Root CA and Issuing CA private keys are each asked twice for confirmation.
+Use a password manager to generate and store them. After finishing, the following files exist:
 
-# Renew server certificates
-Server certificates are renewed with `renewservercert.sh <host>`. After renewal, the files are here:
-* Certificate: `issuingca/certs/`
-* Private key: `issuingca/private/`
+| File | Description |
+|---|---|
+| `rootca/certs/ca.cert.pem` | Root CA certificate (import this into your devices/browsers) |
+| `rootca/private/ca.key.pem` | Root CA private key — keep offline and secure |
+| `issuingca/certs/issuing.cert.pem` | Issuing CA certificate |
+| `issuingca/private/issuing.key.pem` | Issuing CA private key |
 
-There will be an unencrypted key, because this is usually what you need on a server (e.g. on
-a Synology DSM, or on a VMWare ESXi virtualizer). Make sure to delete the open keys after importing!
-If you need to re-import later, use `decryptkey.sh` to create another open key.
+This is a good time to run `uv run backup.py`.
+
+# Issuing and renewing server certificates
+
+```
+uv run gencert.py NAME [-s SAN]... [-m] [--force]
+```
+
+`NAME` is a configured domain (or `*.domain`) for a wildcard certificate, or `host.domain` for a
+single host. The script decides what to do:
+
+| Situation | Action |
+|---|---|
+| No certificate | **Create**: a password is generated in 1Password, then key and certificate |
+| Expired, or expires within 60 days | **Renew** with the same key, CN and SANs |
+| Valid for more than 60 days | Nothing; prints the expiry date (`--force` renews anyway) |
+
+| Option | Description |
+|---|---|
+| `-s SAN` | Extra DNS SAN, repeatable. For new certificates, or with `--force` (replaces the SANs) |
+| `-m` | Multi-domain: add all other configured domains as SANs. Same restriction as `-s` |
+| `--force` | Renew a certificate that is still valid |
+
+The key passwords are read from 1Password and checked against the key files before anything is
+changed. The new certificate is signed into a temporary file, verified against the Root CA, and
+only then replaces the old one, which is kept as `<name>.cert.pem.backup`. If anything fails,
+the existing certificate and key stay untouched; a failed creation can simply be re-run.
+
+Certificates are issued with a **200-day validity** (the maximum permitted by the CA/Browser
+Forum, effective 2026). Use `uv run showexpiries.py` to see which certificates are due.
+
+After each run:
+- the unencrypted key is in `issuingca/private/<name>.key.open.pem` (mode 600) for deployment.
+  **Delete it after installing the certificate.**
+- a backup is written (see `backup.py`); the previous backup is kept as `<zip>.previous`.
+
+### Examples
+
+```sh
+uv run gencert.py home.example.com                      # wildcard *.home.example.com
+uv run gencert.py myserver.home.example.com             # single host
+uv run gencert.py myserver.home.example.com -s myserver.local -s localhost
+uv run gencert.py myserver.home.example.com -m          # + all other configured domains
+```
+
+# Utilities
+
+| Script | Description |
+|---|---|
+| `uv run showexpiries.py` | Lists expiry dates of all issued certificates |
+| `uv run dumpcertificate.py [-d DOMAIN] [-H HOST]` | Dumps key fields of an issued certificate: CN, SANs, expiry, key usage, extended key usage |
+| `uv run backup.py [FILE]` | Creates a compressed ZIP of all keys, certificates and CA database files (`serial`, `index.txt`, …; excludes unencrypted keys); keeps the previous ZIP as `FILE.previous`. FILE defaults to the configured backup filename |
+| `uv run backup.py --restore [FILE]` | Restores from a ZIP backup and resets file permissions; FILE defaults to the configured backup filename |
+| `uv run cleanup.py` | Removes all issued certificates and keys while keeping the CA intact; useful when changing domain names |
+| `uv run cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `uv run initca.py` afterwards |
+| `uv run cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `uv run initca.py` to recreate it from the example file |
+| `uv run decryptkey.py [-d DOMAIN] [-H HOST]` | Re-decrypts a certificate's private key (password from 1Password) — use if the deployment key was already deleted |
+| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology` (default: all). **Highly specific to your infrastructure**, use as a template |
+| `uv run installcerts.py --list-synology` | Lists the certificates installed in Synology DSM and the services using them |
+
+### Synology DSM
+
+`installcerts.py synology` replaces certificates in DSM 7 through its Web API (the same calls as
+the acme.sh `synology_dsm` hook). Each certificate listed under `synology.certificates` replaces
+the DSM certificate with the same CN, keeping its description, default flag and service
+assignments; import it once in the DSM GUI first. The DSM login comes from the 1Password item in
+`synology.login` (username, password, and the one-time password if 2FA is enabled). DSM is only
+trusted if its current certificate chains to our Root CA (its expiry is not checked).
 
 # References
-A very big help was this document:
-https://jamielinux.com/docs/openssl-certificate-authority/introduction.html
+
+- [OpenSSL Certificate Authority](https://jamielinux.com/docs/openssl-certificate-authority/introduction.html)
 
 # TODO
-* Sign a 3rd party CSR
 
-# Extra scripts
-* `test.sh`: Ignore this, it's used to test shell / script commands
-* `decryptkey.sh`: Removes the encryption from a private key. This is often necessary when the key
-has to be installed on a server
-* `copyesxi.sh`: Copies the necessary certificates to a VMWare ESXi server into the correct directories
-* `backup.sh`: This is the only bash script in the collection; It creates a zip file with all the
-keys and certificates in it.
-* `cleanup.sh`: Performs a complete reset; All certificates and keys will be deleted, including the
-root CA. It's usually used during the test phase.
-* `cleanup-clientcertsonly.sh`: Keeps the root/issuing CA intact, and cleans all certificates. I used
-this when I changed the internal domain name, and needed to re-issue all of the server certificates.
+- Sign a 3rd-party CSR
 
 # History
-* &#x200B;19. October 2019: Initial version
-* &#x200B;14. January 2022: Add certificate renewal
 
+- October 2019: Initial version
+- January 2022: Certificate renewal
+- 2025: Rewrite to Python
+- February 2026: Unified `gencert.py` replaces individual cert generation scripts; `initca.py` replaces `generatecacerts.sh` and `init.sh` for the Python workflow; internal information removed from repository
+- October 2026: Key passwords in 1Password; `gencert.py NAME` renews or creates automatically; Synology DSM deployment
