@@ -94,7 +94,8 @@ def _generate_ca():
 
     print()
     print('CA certificates created successfully.')
-    print('Recommended next step: uv run backup.py')
+    print('Next: store both passwords in 1Password as the Password items "root-ca" and')
+    print('"issuing-ca", then run: uv run backup.py')
 
 
 def _prompt_password(label):

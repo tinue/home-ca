@@ -1,13 +1,13 @@
 ---
 opensslpath: /opt/homebrew/bin/openssl # Path to openssl
-domains:
+domains:                                   # The first one is the default domain
   - example.com
   - dmz.example.com
   - other.example.com
-domainalias: com.example # Reverse version of the domain, used to name certain elements
-dockerhost: docker # The machine in my homelab that provides Intel based docker services
-dockerdir: /users/example/Docker/my_project
-zipfilename: certbackup.zip
+domainalias: com.example # Alias of the Root CA in the Java truststore (installcerts.py java)
+dockerhost: docker # Docker host, without domain (installcerts.py docker)
+dockerdir: /users/example/Docker/my_project # Certificates go to its certs/ subdirectory
+zipfilename: certbackup.zip # Backup file, also attached to the 1Password item issuing-ca
 # 1Password vault with one Password item per private key: root-ca, issuing-ca, <cert name>
 onepassword:
   vault: Home CA
@@ -30,7 +30,7 @@ unifi:
   host: unifi.example.com                  # Console hostname
   certificate: example.com                 # Certificate (name as issued) to serve on the console
   login: op://Private/UniFi local admin    # 1Password item with username, password and optional OTP
-# Properties of the certificates
+# Subject fields of the Root and Issuing CA certificates
 certproperties:
 - country: CH
 - state: ZH

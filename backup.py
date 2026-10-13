@@ -107,8 +107,8 @@ def main():
     parser = argparse.ArgumentParser(
         description='Backup and restore CA certificates.',
         epilog=(
-            'Without --restore (default): creates a compressed ZIP of all keys\n'
-            '  and certificates, excluding unencrypted deployment keys.\n\n'
+            'Without --restore (default): creates a compressed ZIP of all keys,\n'
+            '  certificates, CA database files and lib/defaults.yaml.\n\n'
             'With --restore: extracts a ZIP backup and restores file permissions.\n'
             'With --restore --from-1password: restores the backup attached to the\n'
             f'  1Password item "{BACKUP_ITEM}" (FILE names the attachment). Without\n'
