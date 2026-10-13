@@ -74,6 +74,7 @@ def _generate_ca():
 
     print('Signing Issuing CA certificate with Root CA (valid 10 years)...')
     openssl.sign_intermediate_ca(ISSUING_CSR, 'rootca/openssl.cnf', root_password, ISSUING_CERT, days=3650)
+    os.chmod(ISSUING_CERT, 0o444)
 
     # Inspect
     print()
