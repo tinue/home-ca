@@ -3,21 +3,14 @@
 # Minimal client for the Synology DSM 7 Web API: login (with 2FA), list and import certificates.
 # Same API calls as the acme.sh synology_dsm deploy hook.
 #
-# TLS: DSM is trusted only if its certificate chains to our own Root CA. The expiry date
-# is not checked, because DSM usually still serves the expired certificate being replaced.
+# TLS: see lib/https.py.
 
-import http.client
 import json
-import os
-import ssl
-import tempfile
 import urllib.parse
 import uuid
 
-from . import openssl
-
-ROOT_CA = 'rootca/certs/ca.cert.pem'
-ISSUING_CA = 'issuingca/certs/issuing.cert.pem'
+from .common import HomeCAError
+from .https import PinnedHTTPS
 
 # DSM error codes for SYNO.API.Auth login
 _AUTH_ERRORS = {
@@ -33,36 +26,16 @@ _AUTH_ERRORS = {
 }
 
 
-class DSMError(Exception):
+class DSMError(HomeCAError):
     pass
 
 
 class DSM:
     def __init__(self, host, port):
-        self.host = host
-        self.port = port
+        self._https = PinnedHTTPS(host, port)
+        self._auth = None
         self.sid = None
         self.token = None
-        self._trusted = set()          # DER bytes of server certs already verified
-        self._context = ssl.create_default_context()
-        self._context.check_hostname = False
-        self._context.verify_mode = ssl.CERT_NONE   # verified by _check_peer instead
-
-    def _check_peer(self, der):
-        """Verify the server certificate against our Root CA (hostname yes, expiry no)."""
-        if der in self._trusted:
-            return
-        fd, path = tempfile.mkstemp(suffix='.pem')
-        try:
-            with os.fdopen(fd, 'w') as f:
-                f.write(ssl.DER_cert_to_PEM_cert(der))
-            openssl.runssl('verify', '-no_check_time', '-CAfile', ROOT_CA,
-                           '-untrusted', ISSUING_CA, '-verify_hostname', self.host, path)
-        except RuntimeError as e:
-            raise DSMError(f'{self.host} does not present a certificate from our CA:\n{e}')
-        finally:
-            os.unlink(path)
-        self._trusted.add(der)
 
     def _call(self, cgi, params, body=None, content_type=None):
         """POST to /webapi/<cgi>; returns the 'data' member of a successful response."""
@@ -81,22 +54,14 @@ class DSM:
         if self.token:
             headers['X-SYNO-TOKEN'] = self.token
 
-        conn = http.client.HTTPSConnection(self.host, self.port, context=self._context, timeout=60)
-        try:
-            conn.connect()
-            self._check_peer(conn.sock.getpeercert(binary_form=True))
-            conn.request('POST', url, body=body, headers=headers)
-            response = conn.getresponse()
-            text = response.read().decode()
-        finally:
-            conn.close()
+        response, text = self._https.request('POST', url, body, headers)
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
             raise DSMError(f'Unexpected response from {url} (HTTP {response.status}): {text[:200]}')
         if not result.get('success'):
             raise DSMError(f'{params.get("api")}.{params.get("method")} failed: {result.get("error")}',
-                           result.get('error', {}).get('code'))
+                           code=result.get('error', {}).get('code'))
         return result.get('data', {})
 
     def login(self, account, password, otp=None):
@@ -111,14 +76,12 @@ class DSM:
         try:
             data = self._call(auth['path'], params)
         except DSMError as e:
-            code = e.args[1] if len(e.args) > 1 else None
-            if code != 403 or otp is None:
-                raise DSMError(f'Login failed: {_AUTH_ERRORS.get(code, e)}')
+            if e.code != 403 or otp is None:
+                raise DSMError(f'Login failed: {_AUTH_ERRORS.get(e.code, e)}')
             try:
                 data = self._call(auth['path'], {**params, 'otp_code': otp()})
             except DSMError as e:
-                code = e.args[1] if len(e.args) > 1 else None
-                raise DSMError(f'Login failed: {_AUTH_ERRORS.get(code, e)}')
+                raise DSMError(f'Login failed: {_AUTH_ERRORS.get(e.code, e)}')
         self.sid = data['sid']
         self.token = data.get('synotoken')
 

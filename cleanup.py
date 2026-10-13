@@ -9,12 +9,9 @@ import argparse
 import glob
 import os
 import shutil
-import sys
 
-
-def setup():
-    from lib.variables import _PROJECT_ROOT
-    os.chdir(_PROJECT_ROOT)
+from lib import common
+from lib.common import CA_DIRS, ISSUING_CERT, ISSUING_CSR, ISSUING_KEY
 
 
 def _clean_dir(dirpath, keep=None):
@@ -37,27 +34,13 @@ def _reset_dir(dirpath):
     print(f'  reset   {dirpath}/')
 
 
-def _init_database(ca_dir, has_crlnumber=False):
-    """Remove existing database files and reinitialise them."""
-    _remove_database(ca_dir, has_crlnumber)
-    with open(os.path.join(ca_dir, 'index.txt'), 'w'):
-        pass
-    with open(os.path.join(ca_dir, 'serial'), 'w') as f:
-        f.write('1000\n')
-    if has_crlnumber:
-        with open(os.path.join(ca_dir, 'crlnumber'), 'w') as f:
-            f.write('1000\n')
-    print(f'  reset   {ca_dir}/index.txt, serial' +
-          (', crlnumber' if has_crlnumber else ''))
-
-
-def _remove_database(ca_dir, has_crlnumber=False):
+def _remove_database(ca_dir):
     """Remove database files without recreating them."""
     removed = []
     for f in glob.glob(os.path.join(ca_dir, 'index.txt*')):
         os.remove(f)
         removed.append(os.path.basename(f))
-    for name in (['serial', 'crlnumber'] if has_crlnumber else ['serial']):
+    for name in ['serial', 'crlnumber']:
         path = os.path.join(ca_dir, name)
         if os.path.exists(path):
             os.remove(path)
@@ -68,26 +51,23 @@ def _remove_database(ca_dir, has_crlnumber=False):
 
 def cleanup_certs():
     """Remove issued certificates and keys, keeping the CA intact."""
-    _clean_dir('issuingca/certs',    keep=['issuing.cert.pem'])
-    _clean_dir('issuingca/csr',      keep=['issuing.csr.pem'])
+    _clean_dir('issuingca/certs',    keep=[os.path.basename(ISSUING_CERT)])
+    _clean_dir('issuingca/csr',      keep=[os.path.basename(ISSUING_CSR)])
     _clean_dir('issuingca/newcerts')
-    _clean_dir('issuingca/private',  keep=['issuing.key.pem'])
-    _init_database('issuingca', has_crlnumber=True)
+    _clean_dir('issuingca/private',  keep=[os.path.basename(ISSUING_KEY)])
+    _remove_database('issuingca')
+    print(f'  reset   issuingca/{", ".join(common.init_database("issuingca", overwrite=True))}')
     print()
     print('Issued certificates removed. Run uv run gencert.py to issue new ones.')
 
 
 def cleanup_full():
     """Full reset: wipe everything including CA keys, certificates, and database files."""
-    for d in ['certs', 'crl', 'newcerts', 'private']:
-        _reset_dir(f'rootca/{d}')
-    os.chmod('rootca/private', 0o700)
-    _remove_database('rootca')
-
-    for d in ['certs', 'crl', 'csr', 'newcerts', 'private']:
-        _reset_dir(f'issuingca/{d}')
-    os.chmod('issuingca/private', 0o700)
-    _remove_database('issuingca', has_crlnumber=True)
+    for ca, subdirs in CA_DIRS.items():
+        for d in subdirs:
+            _reset_dir(f'{ca}/{d}')
+        os.chmod(f'{ca}/private', 0o700)
+        _remove_database(ca)
 
     print()
     print('Full reset complete. Run uv run initca.py to regenerate the CA.')
@@ -130,32 +110,19 @@ def main():
     )
     args = parser.parse_args()
 
-    setup()
-
     if args.clobber:
-        print('WARNING: This will delete ALL certificates, keys, database files, AND defaults.yaml!')
-        answer = input('Are you sure? (y/N) ')
-        if answer.strip().lower() != 'y':
-            print('Aborted.')
-            sys.exit(0)
-        print()
-        cleanup_clobber()
+        warning, action = ('WARNING: This will delete ALL certificates, keys, database files, '
+                           'AND defaults.yaml!', cleanup_clobber)
     elif args.full:
-        print('WARNING: This will delete ALL certificates, keys, and database files, including the CA!')
-        answer = input('Are you sure? (y/N) ')
-        if answer.strip().lower() != 'y':
-            print('Aborted.')
-            sys.exit(0)
-        print()
-        cleanup_full()
+        warning, action = ('WARNING: This will delete ALL certificates, keys, and database files, '
+                           'including the CA!', cleanup_full)
     else:
-        print('This will delete all issued certificates. CA keys and certificates are kept.')
-        answer = input('Are you sure? (y/N) ')
-        if answer.strip().lower() != 'y':
-            print('Aborted.')
-            sys.exit(0)
-        print()
-        cleanup_certs()
+        warning, action = ('This will delete all issued certificates. CA keys and certificates '
+                           'are kept.', cleanup_certs)
+    print(warning)
+    common.confirm('Are you sure?')
+    print()
+    action()
 
 
 if __name__ == '__main__':

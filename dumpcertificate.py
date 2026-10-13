@@ -2,18 +2,10 @@
 # (c) Martin Erzberger 2026
 # Dump key fields of an issued certificate: CN, SANs, expiry, key usage, EKU.
 
+import argparse
 import os
-import sys
 
-from lib import openssl
-
-
-def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
-    os.environ["PROJECTROOT"] = variables.projectroot
+from lib import common, openssl
 
 
 def dump_certificate(cert_path):
@@ -43,45 +35,14 @@ def dump_certificate(cert_path):
 
 
 def main():
-    setup()
-
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description='Dump key fields of an issued certificate.',
-    )
-    parser.add_argument(
-        '-d', '--domain',
-        default=variables.domain,
-        choices=variables.domains,
-        metavar='DOMAIN',
-        help=(
-            f'Domain the cert was issued for (default: {variables.domain}). '
-            f'Choices: {" | ".join(variables.domains)}'
-        ),
-    )
-    parser.add_argument(
-        '-H', '--host',
-        default='*',
-        metavar='HOST',
-        help='Hostname or * for wildcard (default: *)',
-    )
-    args = parser.parse_args()
-
-    domain = args.domain
-    cert_name = domain if args.host == '*' else f'{args.host}.{domain}'
-    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
+    parser = argparse.ArgumentParser(description='Dump key fields of an issued certificate.')
+    common.add_cert_name_args(parser)
+    cert_path = common.cert_path(common.cert_name_from_args(parser.parse_args()))
 
     if not os.path.exists(cert_path):
-        print(f'Error: {cert_path} not found.')
-        sys.exit(1)
-
-    try:
-        dump_certificate(cert_path)
-    except RuntimeError as e:
-        print(f'Error: {e}')
-        sys.exit(1)
+        raise common.HomeCAError(f'{cert_path} not found.')
+    dump_certificate(cert_path)
 
 
 if __name__ == '__main__':
-    main()
+    common.run(main)

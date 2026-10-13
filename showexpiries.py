@@ -7,19 +7,12 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from lib import expiry
+from lib import common, expiry
 
 try:
     locale.setlocale(locale.LC_TIME, '')
 except locale.Error:
     pass  # unsupported locale; strftime will use the C default
-
-
-def setup():
-    global variables
-    from lib.common import setup as common_setup
-    variables = common_setup()
-    os.chdir(variables.projectroot)
 
 
 _RED = '\033[31m'
@@ -48,5 +41,4 @@ def dump_expiries():
 
 # Program starts here
 if __name__ == "__main__":
-    setup()
-    dump_expiries()
+    common.run(dump_expiries)
