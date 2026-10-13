@@ -76,14 +76,15 @@ def install_java_ca():
     ca_cert = 'rootca/certs/ca.cert.pem'
 
     print(f'Updating Java keystore (alias: {alias}) ...')
-    # Remove existing entry first; ignore failure if alias is not present
-    subprocess.run(
-        [keytool, '-delete', '-alias', alias, '-cacerts', '-storepass', 'changeit', '-v'],
-    )
+    # Replace an existing entry; a fresh truststore (e.g. after a JDK upgrade) has none
+    listed = subprocess.run([keytool, '-list', '-alias', alias, '-cacerts', '-storepass', 'changeit'],
+                            capture_output=True)
+    if listed.returncode == 0:
+        _run(keytool, '-delete', '-alias', alias, '-cacerts', '-storepass', 'changeit')
     _run(keytool, '-importcert', '-alias', alias,
          '-trustcacerts', '-noprompt',
          '-cacerts', '-storepass', 'changeit',
-         '-file', ca_cert, '-v')
+         '-file', ca_cert)
     print('Done.')
 
 
