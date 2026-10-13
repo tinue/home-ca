@@ -43,6 +43,9 @@ class Variables:
         # Synology DSM certificate deployment (optional)
         self.synology = defaults.get('synology') or {}
 
+        # Proxmox VE certificate deployment (optional)
+        self.proxmox = defaults.get('proxmox') or {}
+
         # Properties of the certificates
         cert_properties = {}
         for entry in defaults.get('certproperties'):

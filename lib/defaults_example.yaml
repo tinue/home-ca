@@ -20,6 +20,12 @@ synology:
     - example.com                          # matched by their CN
     - nas.example.com
   login: op://Private/Synology admin       # 1Password item with username, password and optional OTP
+# Proxmox VE deployment (optional, used by installcerts.py proxmox)
+proxmox:
+  certificate: example.com                 # Certificate (name as issued) installed as the pveproxy certificate
+  nodes:                                   # ssh destinations of the nodes (passwordless, as root;
+    - pve1                                 # user and hostname may come from ~/.ssh/config)
+    - pve2
 # Properties of the certificates
 certproperties:
 - country: CH

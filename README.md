@@ -63,7 +63,7 @@ Copy `lib/defaults_example.yaml` to `lib/defaults.yaml` and edit it to match you
 (or simply run `uv run initca.py`, which does this automatically).
 
 Besides paths and certificate properties, it sets the 1Password vault (`onepassword.vault`) and,
-optionally, the Synology DSM deployment (`synology`, see `installcerts.py`).
+optionally, the Synology DSM and Proxmox VE deployments (`synology`, `proxmox`, see `installcerts.py`).
 
 # One-time setup
 
@@ -123,10 +123,11 @@ the existing certificate and key stay untouched; a failed creation can simply be
 Certificates are issued with a **200-day validity** (the maximum permitted by the CA/Browser
 Forum, effective 2026). Use `uv run showexpiries.py` to see which certificates are due.
 
-After each run:
-- the unencrypted key is in `issuingca/private/<name>.key.open.pem` (mode 600) for deployment.
-  **Delete it after installing the certificate.**
-- a backup is written (see `backup.py`); the previous backup is kept as `<zip>.previous`.
+After each run a backup is written (see `backup.py`); the previous backup is kept as
+`<zip>.previous`. Deploy the certificate with `uv run installcerts.py`.
+
+Unencrypted private keys are never stored. Whatever needs a key (`installcerts.py`,
+`decryptkey.py`) decrypts it in memory with the password from 1Password.
 
 ### Examples
 
@@ -148,8 +149,8 @@ uv run gencert.py myserver.home.example.com -m          # + all other configured
 | `uv run cleanup.py` | Removes all issued certificates and keys while keeping the CA intact; useful when changing domain names |
 | `uv run cleanup.py --full` | **Destructive**: deletes everything including CA keys, certificates, and database files (`serial`, `crlnumber`, `index.txt`); re-run `uv run initca.py` afterwards |
 | `uv run cleanup.py --clobber` | **Destructive**: like `--full`, but also deletes `lib/defaults.yaml`; re-run `uv run initca.py` to recreate it from the example file |
-| `uv run decryptkey.py [-d DOMAIN] [-H HOST]` | Re-decrypts a certificate's private key (password from 1Password) — use if the deployment key was already deleted |
-| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology` (default: all). **Highly specific to your infrastructure**, use as a template |
+| `uv run decryptkey.py [-d DOMAIN] [-H HOST]` | Prints a certificate's decrypted private key (password from 1Password) to stdout, for manual imports, e.g. `uv run decryptkey.py -H nas \| pbcopy`. No file is written |
+| `uv run installcerts.py [TARGET...]` | Deploys certificates; targets `docker`, `java`, `synology`, `proxmox` (default: all). **Highly specific to your infrastructure**, use as a template |
 | `uv run installcerts.py --list-synology` | Lists the certificates installed in Synology DSM and the services using them |
 
 ### Synology DSM
@@ -160,6 +161,17 @@ the DSM certificate with the same CN, keeping its description, default flag and 
 assignments; import it once in the DSM GUI first. The DSM login comes from the 1Password item in
 `synology.login` (username, password, and the one-time password if 2FA is enabled). DSM is only
 trusted if its current certificate chains to our Root CA (its expiry is not checked).
+
+### Proxmox VE
+
+`installcerts.py proxmox` installs the certificate in `proxmox.certificate` as the custom
+`pveproxy` certificate (web UI and API, port 8006) on each node listed under `proxmox.nodes`.
+The node entries are ssh destinations: root login without a password, with user and hostname
+optionally taken from `~/.ssh/config`. For each node the key and certificate are copied to a
+private temporary directory, installed with `pvenode cert set … --force 1 --restart 1` (the
+supported way, which writes `/etc/pve/nodes/<node>/pveproxy-ssl.{pem,key}`), and then deleted.
+Afterwards the script checks that the node's FQDN serves the new certificate, trusted via our Root CA.
+The cluster-internal `pve-ssl.*` certificates are not touched.
 
 # References
 
@@ -175,4 +187,4 @@ trusted if its current certificate chains to our Root CA (its expiry is not chec
 - January 2022: Certificate renewal
 - 2025: Rewrite to Python
 - February 2026: Unified `gencert.py` replaces individual cert generation scripts; `initca.py` replaces `generatecacerts.sh` and `init.sh` for the Python workflow; internal information removed from repository
-- October 2026: Key passwords in 1Password; `gencert.py NAME` renews or creates automatically; Synology DSM deployment
+- October 2026: Key passwords in 1Password; `gencert.py NAME` renews or creates automatically; Synology DSM deployment; Proxmox VE deployment; unencrypted keys are no longer stored

@@ -8,7 +8,7 @@
 # - Certificate exists and is still valid: nothing is done (unless --force).
 # - No certificate: a password is generated in 1Password, then key and cert are created.
 # Passwords come from 1Password (one Password item per key, see lib/onepassword.py).
-# Afterwards the unencrypted key is left for installation and a backup is made.
+# Afterwards a backup is made; deploy with installcerts.py, which decrypts the key on demand.
 
 import argparse
 import os
@@ -86,17 +86,6 @@ def key_password_for_new_cert(cert_name, key_path):
                  'Its password is unknown; remove the key file to start over.')
     print(f'Creating 1Password item "{cert_name}" with a generated password ...')
     return onepassword.create_password_item(cert_name, f'Password for {key_path} (home-ca)')
-
-
-def write_open_key(cert_name, key_password):
-    """Write the unencrypted key for deployment, readable only by the owner."""
-    path = f'issuingca/private/{cert_name}.key.open.pem'
-    if os.path.exists(path):
-        os.remove(path)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'w') as f:
-        f.write(openssl.decrypted_key(cert_name, key_password))
-    return path
 
 
 def main():
@@ -192,16 +181,12 @@ def main():
     os.rename(new_path, cert_path)
     os.chmod(cert_path, 0o444)
 
-    # 5. Unencrypted key for installation
-    open_key = write_open_key(cert_name, key_password)
-
     _, end = expiry.status(cert_path)
     print()
     print(f'{"Renewed" if is_renewal else "Created"} {cert_path}, valid until {end:%Y-%m-%d %H:%M} UTC')
-    print(f'Unencrypted private key for installation: {open_key}')
-    print('Delete it after installing the certificate.')
+    print('Install it with: uv run installcerts.py')
 
-    # 6. Backup
+    # 5. Backup
     print()
     import backup
     backup.setup()

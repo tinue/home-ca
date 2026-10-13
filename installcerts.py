@@ -8,8 +8,11 @@
 import argparse
 import getpass
 import os
+import socket
+import ssl
 import subprocess
 import sys
+import time
 
 from lib import onepassword, openssl, synology
 
@@ -27,23 +30,35 @@ def _run(*args):
     subprocess.run(args, check=True)
 
 
+def _key_pem(cert_name):
+    """Decrypt the certificate's private key in memory, with the password from 1Password."""
+    return openssl.decrypted_key(cert_name, onepassword.read_password(cert_name))
+
+
+def _leaf_pem(cert_path):
+    """Return the first certificate of a cert file (leaf + issuing CA)."""
+    with open(cert_path) as f:
+        return f.read().split('-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----\n'
+
+
+def _ssh_write(host, path, content):
+    """Write content to a file on host via ssh stdin, readable only by the owner."""
+    print(f'ssh {host} cat > {path}')
+    subprocess.run(['ssh', host, f'umask 077 && cat > {path}'], input=content, text=True, check=True)
+
+
 def install_docker_certs():
     """Copy wildcard certificate and key to the Docker host."""
     fqdn = f'{variables.dockerhost}.{variables.domain}'
     remote_dir = variables.dockerdir
     cert_src = f'issuingca/certs/{variables.domain}.cert.pem'
-    key_src  = f'issuingca/private/{variables.domain}.key.open.pem'
-
-    if not os.path.exists(key_src):
-        print(f'Error: {key_src} not found.')
-        print('Run uv run gencert.py (or uv run decryptkey.py) first to produce the unencrypted key.')
-        sys.exit(1)
+    key_pem  = _key_pem(variables.domain)
 
     print(f'Installing wildcard certificate to {fqdn}:{remote_dir}/certs ...')
     _run('ssh', fqdn, f'rm -rf {remote_dir}/certs')
     _run('ssh', fqdn, f'mkdir -p {remote_dir}/certs')
     _run('scp', cert_src, f'{fqdn}:{remote_dir}/certs/{variables.domain}.cert')
-    _run('scp', key_src,  f'{fqdn}:{remote_dir}/certs/{variables.domain}.key')
+    _ssh_write(fqdn, f'{remote_dir}/certs/{variables.domain}.key', key_pem)
     _run('ssh', fqdn, f'chmod 444 {remote_dir}/certs/{variables.domain}.cert')
     _run('ssh', fqdn, f'chmod 400 {remote_dir}/certs/{variables.domain}.key')
     print('Done.')
@@ -118,7 +133,6 @@ def install_synology_certs():
 
 def _install_synology_cert(dsm, installed, cert_name):
     cert_path = f'issuingca/certs/{cert_name}.cert.pem'
-    key_path = f'issuingca/private/{cert_name}.key.open.pem'
     cn = openssl.subject_cn(cert_path)
 
     matches = [c for c in installed if c['subject'].get('common_name') == cn]
@@ -127,14 +141,8 @@ def _install_synology_cert(dsm, installed, cert_name):
                  'Import it once in the DSM GUI, then re-run. List: uv run installcerts.py --list-synology')
     existing = matches[0]
 
-    if os.path.exists(key_path):
-        with open(key_path) as f:
-            key_pem = f.read()
-    else:
-        key_pem = openssl.decrypted_key(cert_name, onepassword.read_password(cert_name))
-    with open(cert_path) as f:
-        # The cert file holds leaf + issuing CA; DSM wants them separately
-        cert_pem = f.read().split('-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----\n'
+    key_pem = _key_pem(cert_name)
+    cert_pem = _leaf_pem(cert_path)   # DSM wants leaf and issuing CA separately
     with open('issuingca/certs/issuing.cert.pem') as f:
         chain_pem = f.read()
 
@@ -144,15 +152,60 @@ def _install_synology_cert(dsm, installed, cert_name):
           + (', DSM restarts its web server' if result.get('restart_httpd') else ''))
 
 
+def install_proxmox_certs():
+    """Install the configured certificate as pveproxy certificate on each Proxmox VE node."""
+    config = variables.proxmox
+    if not config:
+        sys.exit('No proxmox section in lib/defaults.yaml.')
+    cert_name = config['certificate']
+    cert_path = f'issuingca/certs/{cert_name}.cert.pem'
+    key_pem = _key_pem(cert_name)
+
+    for node in config['nodes']:
+        print(f'Installing {cert_name} to Proxmox VE node {node} ...')
+        fqdn, tmp = subprocess.run(['ssh', node, 'hostname -f && mktemp -d'], capture_output=True,
+                                   text=True, check=True).stdout.split()
+        try:
+            _ssh_write(node, f'{tmp}/key.pem', key_pem)
+            _run('scp', '-q', cert_path, f'{node}:{tmp}/cert.pem')
+            # The supported way; it writes /etc/pve/nodes/<node>/pveproxy-ssl.{pem,key}
+            _run('ssh', node, f'pvenode cert set {tmp}/cert.pem {tmp}/key.pem --force 1 --restart 1')
+        finally:
+            subprocess.run(['ssh', node, f'rm -rf {tmp}'], check=True)
+        _verify_served(fqdn, 8006, cert_path)
+
+
+def _verify_served(host, port, cert_path, timeout=15):
+    """Check that host:port serves cert_path, trusted via our Root CA (waits for restarts)."""
+    leaf_der = ssl.PEM_cert_to_DER_cert(_leaf_pem(cert_path))
+    context = ssl.create_default_context(cafile='rootca/certs/ca.cert.pem')
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=5) as sock:
+                with context.wrap_socket(sock, server_hostname=host) as tls:
+                    served = tls.getpeercert(binary_form=True)
+            break
+        except (OSError, ssl.SSLError) as e:
+            if time.monotonic() > deadline:
+                sys.exit(f'  {host}:{port} not reachable with a trusted certificate: {e}')
+            time.sleep(1)
+    if served != leaf_der:
+        sys.exit(f'  {host}:{port} serves a different certificate than {cert_path}.')
+    print(f'  {host}:{port} serves it, valid until {openssl.enddate(cert_path)}')
+
+
 TARGETS = {
     'docker': install_docker_certs,
     'java': install_java_ca,
     'synology': install_synology_certs,
+    'proxmox': install_proxmox_certs,
 }
 
 
 def main():
     setup()
+    sys.stdout.reconfigure(line_buffering=True)   # keep our output in order with the commands'
     parser = argparse.ArgumentParser(description='Install certificates to their target systems.')
     parser.add_argument('targets', nargs='*', metavar='TARGET',
                         help=f'what to install: {", ".join(TARGETS)} (default: all)')

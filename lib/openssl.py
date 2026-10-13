@@ -132,15 +132,6 @@ def verify_certificate(cert_name, cert_path=None):
         cert_path,
     )
 
-def decrypt_key(cert_name, key_password):
-    return runssl(
-        'rsa',
-        '-in', f'issuingca/private/{cert_name}.key.pem',
-        '-passin', f'env:{PASSIN}',
-        '-out', f'issuingca/private/{cert_name}.key.open.pem',
-        passin=key_password,
-    )
-
 def decrypted_key(cert_name, key_password):
     """Return the unencrypted private key as PEM text, without writing a file."""
     return runssl(
